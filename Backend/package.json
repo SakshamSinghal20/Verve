@@ -5,6 +5,7 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "mediasoup": "^3.19.17",
     "mongoose": "^9.2.3",
     "socket.io": "^4.8.3",
     "uuid": "^13.0.0"

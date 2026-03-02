@@ -1,3 +1,4 @@
+const mediasoup = require("mediasoup");
 const express = require("express");
 const http = require("http");
 const app = express();
@@ -13,6 +14,22 @@ const io = new Server(server, {
 app.get("/", (req, res) => {
     res.send("Server is running");
 });
+
+let worker;
+const room = new Map();
+async function createWorker() {
+    worker = await mediasoup.createWorker({
+        rtcMinPort: 20000,
+        rtcMaxPort: 20200,
+    });
+    console.log("Mediasoup Worker created");
+
+    worker.on("died", () => {
+        console.error("Mediasoup worker died");
+        process.exit(1);
+    });
+
+}
 
 io.on("connection", (socket) => {
     console.log("user connected", socket.id);
