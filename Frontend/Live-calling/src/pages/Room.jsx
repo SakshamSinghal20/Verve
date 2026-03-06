@@ -6,7 +6,7 @@ function Room() {
     const videoRef = useRef(null);
 
     useEffect(() => {
-        const getMedia = async () => {
+        const startMedia = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: true,
@@ -14,13 +14,12 @@ function Room() {
                 });
 
                 videoRef.current.srcObject = stream;
-
-            } catch (error) {
-                console.error("Error accessing media devices", error);
+            } catch (err) {
+                console.error("Media access error:", err);
             }
         };
 
-        getMedia();
+        startMedia();
     }, []);
 
     return (
@@ -32,9 +31,8 @@ function Room() {
                 autoPlay
                 playsInline
                 muted
-                style={{ width: "400px" }}
+                width="500"
             />
-
         </div>
     );
 }
