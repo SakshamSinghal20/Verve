@@ -46,6 +46,10 @@ io.on("connection", (socket) => {
     });
 });
 
+(async () => {
+    await createWorker();
+})();
+
 server.listen(5000, () => {
     console.log("server running on port 5000")
 })

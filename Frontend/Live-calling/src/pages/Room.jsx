@@ -17,6 +17,10 @@ function Room() {
                     video: true,
                     audio: true
                 });
+                const videoTrack = stream.getVideoTracks()[0];
+                const audioTracks = stream.getAudioTracks()[0];
+
+                videoRef.current.srcObject = stream;
 
                 videoRef.current.srcObject = stream;
             } catch (err) {
