@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
+import * as mediasoupClient from "mediasoup-client";
+
+let device;
+let producerTransport;
+let producer;
 
 function Room() {
     const { roomId } = useParams();
