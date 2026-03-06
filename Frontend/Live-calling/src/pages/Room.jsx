@@ -29,6 +29,10 @@ function Room() {
         };
 
         startMedia();
+
+        socket.on("router-rtp-capabilities", (data) => {
+            console.log("Router RTP Capabilities:", data);
+        });
     }, []);
 
     return (

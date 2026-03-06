@@ -31,16 +31,43 @@ async function createWorker() {
 
 }
 
+const mediaCodecs = [
+    {
+        kind: "audio",
+        mimeType: "audio/opus",
+        clockRate: 48000,
+        channels: 2,
+    },
+    {
+        kind: "video",
+        mimeType: "video/VP8",
+        clockRate: 90000,
+    }
+];
+
 io.on("connection", (socket) => {
     console.log("user connected", socket.id);
 
-    socket.on("join-room", (roomId) => {
-        socket.join(roomId);
-        console.log(`Socket ${socket.id} joined room ${roomId}`);
+    socket.on("join-room", async (roomId) => {
 
-        socket.to(roomId).emit("user-joined", socket.id);
-        socket.emit("room-joined", roomId)
+        socket.join(roomId);
+
+        if (!room.has(roomId)) {
+            const router = await worker.createRouter({ mediaCodecs });
+
+            room.set(roomId, {
+                router,
+                peers: []
+            });
+        }
+
+        const router = room.get(roomId).router;
+
+        socket.emit("router-rtp-capabilities", router.rtpCapabilities);
+
+        console.log(`Socket ${socket.id} joined room ${roomId}`);
     });
+
     socket.on("disconnect", () => {
         console.log("user-disconnected:", socket.id);
     });
