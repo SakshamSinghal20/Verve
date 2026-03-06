@@ -1,13 +1,16 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
-import './index.css'
-import App from './App.jsx'
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import App from "./App";
+import Room from "./pages/Room";
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+function Main() {
+  return (
     <BrowserRouter>
-      <App />
+      <Routes>
+        <Route path="/" element={<App />} />
+        <Route path="/room/:roomId" element={<Room />} />
+      </Routes>
     </BrowserRouter>
-  </StrictMode>
-)
+  );
+}
+
+export default Main;
