@@ -48,7 +48,29 @@ const mediaCodecs = [
 io.on("connection", (socket) => {
     console.log("user connected", socket.id);
 
+    socket.on("create-transport", async () => {
+        const roomData = room.get(roomId);
+        const router = roomData.router;
+
+        const transport = await router.createWebRtcTransport({
+            listenIps: [{ ip: "127.0.0.1", announcedIp: null }],
+            enableUdp: true,
+            enableTcp: true,
+            preferUdp: true,
+        });
+
+        socket.emit("transport-created", {
+            id: transport.id,
+            iceParameters: transport.iceParameters,
+            iceCandidates: transport.iceCandidates,
+            dtlsParameters: transport.dtlsParameters,
+        });
+
+        socket.transport = transport;
+    });
+
     socket.on("join-room", async (roomId) => {
+
 
         socket.join(roomId);
 
