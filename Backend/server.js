@@ -49,8 +49,11 @@ io.on("connection", (socket) => {
     console.log("user connected", socket.id);
 
     socket.on("create-transport", async () => {
-        const roomData = room.get(roomId);
-        const router = roomData.router;
+        const router = socket.router;
+        if (!router) {
+            console.error(`[${socket.id}] create-transport called before joining a room`);
+            return;
+        }
 
         const transport = await router.createWebRtcTransport({
             listenIps: [{ ip: "127.0.0.1", announcedIp: null }],
@@ -58,6 +61,8 @@ io.on("connection", (socket) => {
             enableTcp: true,
             preferUdp: true,
         });
+
+        console.log(`[${socket.id}] Transport created: ${transport.id}`);
 
         socket.emit("transport-created", {
             id: transport.id,
@@ -84,11 +89,42 @@ io.on("connection", (socket) => {
         }
 
         const router = room.get(roomId).router;
+        socket.router = router; // store so create-transport can access it
 
         socket.emit("router-rtp-capabilities", router.rtpCapabilities);
         socket.emit("room-joined", roomId);
 
         console.log(`Socket ${socket.id} joined room ${roomId}`);
+    });
+
+    socket.on("connect-transport", async ({ transportId, dtlsParameters }) => {
+        try {
+            const transport = socket.transport;
+            if (!transport || transport.id !== transportId) {
+                return socket.emit("transport-connect-error", "Transport not found");
+            }
+            await transport.connect({ dtlsParameters });
+            console.log(`[${socket.id}] Transport connected`);
+            socket.emit("transport-connected");
+        } catch (err) {
+            console.error("connect-transport error:", err);
+            socket.emit("transport-connect-error", err.message);
+        }
+    });
+
+    socket.on("produce", async ({ transportId, kind, rtpParameters }) => {
+        try {
+            const transport = socket.transport;
+            if (!transport || transport.id !== transportId) {
+                return socket.emit("produce-error", "Transport not found");
+            }
+            const producer = await transport.produce({ kind, rtpParameters });
+            console.log(`[${socket.id}] Producer created: ${producer.id} (${kind})`);
+            socket.emit("producer-created", { id: producer.id });
+        } catch (err) {
+            console.error("produce error:", err);
+            socket.emit("produce-error", err.message);
+        }
     });
 
     socket.on("disconnect", () => {
