@@ -3,7 +3,7 @@ import './App.css';
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const socket = io("http://localhost:5000");
+export const socket = io("http://localhost:5000");
 
 function App() {
 

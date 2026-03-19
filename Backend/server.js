@@ -64,6 +64,7 @@ io.on("connection", (socket) => {
         const router = room.get(roomId).router;
 
         socket.emit("router-rtp-capabilities", router.rtpCapabilities);
+        socket.emit("room-joined", roomId);
 
         console.log(`Socket ${socket.id} joined room ${roomId}`);
     });
