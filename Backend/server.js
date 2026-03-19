@@ -92,7 +92,6 @@ io.on("connection", (socket) => {
         socket.router = router; // store so create-transport can access it
 
         socket.emit("router-rtp-capabilities", router.rtpCapabilities);
-        socket.emit("room-joined", roomId);
 
         console.log(`Socket ${socket.id} joined room ${roomId}`);
     });

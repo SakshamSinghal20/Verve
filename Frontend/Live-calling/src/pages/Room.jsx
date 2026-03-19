@@ -27,6 +27,9 @@ function Room() {
 
         console.log("[Room] Joined room:", roomId);
 
+        // Tell the server we are joining the room
+        socket.emit("join-room", roomId);
+
         // Step 1 – receive RTP capabilities → load device → request transport
         socket.on("router-rtp-capabilities", async (rtpCapabilities) => {
             try {

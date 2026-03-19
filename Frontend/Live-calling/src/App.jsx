@@ -11,24 +11,20 @@ function App() {
   const navigate = useNavigate();
 
   const handleJoin = () => {
-    if (!roomId) return;
-    socket.emit("join-room", roomId);
+    if (!roomId.trim()) return;
+    // Navigate immediately → Room.jsx mounts → registers listeners → THEN emits join-room
+    // This avoids a race where server responds before Room.jsx has set up its socket listeners
+    navigate(`/room/${roomId.trim()}`);
   };
-
-  useEffect(() => {
-    socket.on("room-joined", (roomId) => {
-      navigate(`/room/${roomId}`);
-    });
-
-    return () => {
-      socket.off("room-joined");
-    };
-  }, [navigate]);
 
   useEffect(() => {
     socket.on("connect", () => {
       console.log("Connected to server:", socket.id);
     });
+
+    return () => {
+      socket.off("connect");
+    };
   }, []);
 
   return (
