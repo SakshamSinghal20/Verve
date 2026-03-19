@@ -1,13 +1,168 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>verve</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8">
+<title>Verve</title>
+
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  background: #ffffff;
+  color: #202124;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 30px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.logo {
+  font-size: 20px;
+  font-weight: 600;
+  color: #5f6368;
+}
+
+.main {
+  display: flex;
+  height: calc(100vh - 70px);
+}
+
+.sidebar {
+  width: 220px;
+  padding: 20px;
+}
+
+.menu-item {
+  padding: 12px;
+  border-radius: 20px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.menu-item.active {
+  background: #e8f0fe;
+  color: #1967d2;
+  font-weight: 500;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.content h1 {
+  font-size: 40px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.content p {
+  color: #5f6368;
+  margin-bottom: 25px;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.btn-primary {
+  background: #1a73e8;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 25px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.input-box {
+  padding: 12px;
+  border-radius: 25px;
+  border: 1px solid #dadce0;
+  width: 250px;
+  outline: none;
+}
+
+.illustration {
+  margin-top: 30px;
+  width: 220px;
+  height: 220px;
+  background: #e8f0fe;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+}
+
+.footer-text {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.footer-text h3 {
+  margin-bottom: 5px;
+}
+
+.footer-text p {
+  color: #5f6368;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="header">
+  <div class="logo">📹 Google Meet</div>
+  <div>12:46 PM • Thu, Mar 19</div>
+</div>
+
+
+<div class="main">
+
+
+  <div class="sidebar">
+    <div class="menu-item active">📅 Meetings</div>
+    <div class="menu-item">📞 Calls</div>
+  </div>
+
+
+  <div class="content">
+    <h1>Video calls and meetings for everyone</h1>
+    <p>Connect, collaborate, and celebrate from anywhere with Verve</p>
+
+    <div class="actions">
+      <button class="btn-primary">➕ New meeting</button>
+      <input class="input-box" placeholder="Enter a code or link">
+    </div>
+
+    <hr style="width:60%; margin:20px 0; border:0.5px solid #e0e0e0;">
+
+    <div class="illustration">🔗</div>
+
+    <div class="footer-text">
+      <h3>Get a link you can share</h3>
+      <p>Click New meeting to get a link you can send to people</p>
+    </div>
+  </div>
+
+</div>
+
+</body>
 </html>
