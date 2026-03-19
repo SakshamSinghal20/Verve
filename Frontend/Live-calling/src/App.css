@@ -1,83 +1,243 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+/* ══════════════════════════════════════════════════════════════════════════ */
+/*  LANDING / HOME PAGE                                                      */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+.landing-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 50% 0%, #1a1033 0%, #0d0d14 70%);
+    overflow: hidden;
 }
 
-.container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
+/* ── Decorative background orbs ──────────────────────────────────────────── */
+.bg-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.35;
+    pointer-events: none;
+    animation: float 8s ease-in-out infinite;
 }
 
-h1 {
-  font-size: 4rem;
-  background: -webkit-linear-gradient(45deg, #FF6B6B, #4ECDC4);
-  background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin: 0;
-  line-height: 1.2;
+.orb-1 {
+    width: 400px;
+    height: 400px;
+    background: #6e8efb;
+    top: -100px;
+    left: -100px;
+    animation-delay: 0s;
 }
 
-.subtitle {
-  font-size: 1.2rem;
-  color: #888;
-  margin-bottom: 2rem;
+.orb-2 {
+    width: 300px;
+    height: 300px;
+    background: #FF6B6B;
+    bottom: -80px;
+    right: -80px;
+    animation-delay: 2s;
 }
 
-.button-group {
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
+.orb-3 {
+    width: 250px;
+    height: 250px;
+    background: #4ECDC4;
+    top: 50%;
+    right: 20%;
+    animation-delay: 4s;
 }
 
-button {
-  border-radius: 50px;
-  border: none;
-  padding: 1rem 2rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  font-family: inherit;
+@keyframes float {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50%      { transform: translateY(-30px) scale(1.05); }
 }
 
-.primary-btn {
-  background: linear-gradient(135deg, #6e8efb, #a777e3);
-  color: white;
-  box-shadow: 0 4px 15px rgba(110, 142, 251, 0.4);
+/* ── Landing card ────────────────────────────────────────────────────────── */
+.landing-card {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 3.5rem 3rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 28px;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow:
+        0 30px 60px rgba(0, 0, 0, 0.5),
+        0 0 80px rgba(110, 142, 251, 0.06);
+    max-width: 440px;
+    width: 90vw;
 }
 
-.primary-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(110, 142, 251, 0.6);
+.landing-title {
+    font-size: 3.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #FF6B6B 0%, #4ECDC4 50%, #6e8efb 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
 }
 
-.secondary-btn {
-  background: white;
-  color: #333;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  border: 1px solid #eee;
+.landing-subtitle {
+    font-size: 1.05rem;
+    color: #8888aa;
+    text-align: center;
+    margin-bottom: 0.5rem;
 }
 
-.secondary-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+/* ── Actions section ─────────────────────────────────────────────────────── */
+.landing-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+    width: 100%;
 }
 
-@media (prefers-color-scheme: dark) {
-  .secondary-btn {
-    background: #2a2a2a;
+.btn-create {
+    width: 100%;
+    padding: 0.9rem 1.5rem;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #6e8efb, #a777e3);
     color: white;
-    border: 1px solid #444;
-  }
+    font-size: 1.05rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 6px 24px rgba(110, 142, 251, 0.3);
+}
+
+.btn-create:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(110, 142, 251, 0.45);
+}
+
+.btn-create:active {
+    transform: translateY(0);
+}
+
+.btn-icon {
+    font-size: 1.2rem;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 0.75rem;
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.divider span {
+    font-size: 0.8rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.join-group {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.join-group input {
+    flex: 1;
+    padding: 0.8rem 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e0e0f0;
+    font-size: 0.95rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.join-group input::placeholder {
+    color: #555;
+}
+
+.join-group input:focus {
+    border-color: rgba(110, 142, 251, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-join {
+    padding: 0.8rem 1.2rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #c8c8e8;
+    font-size: 0.95rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    white-space: nowrap;
+}
+
+.btn-join:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(110, 142, 251, 0.4);
+    transform: translateY(-1px);
+}
+
+.btn-join:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ── Connection indicator ────────────────────────────────────────────────── */
+.connection-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 0.5rem;
+}
+
+.connection-indicator .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    transition: background 0.3s;
+}
+
+.connection-indicator.online .dot {
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+
+.connection-indicator.offline .dot {
+    background: #f59e0b;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+    animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
 }

@@ -1,160 +1,265 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { socket } from "../App";
 import * as mediasoupClient from "mediasoup-client";
 import "./Room.css";
 
 function Room() {
     const { roomId } = useParams();
+    const navigate = useNavigate();
 
     // ── Refs ──────────────────────────────────────────────────────────────────
-    const videoRef        = useRef(null);   // <video> element
-    const deviceRef       = useRef(null);   // mediasoup Device
-    const transportRef    = useRef(null);   // send WebRtcTransport
-    const streamRef       = useRef(null);   // local MediaStream
-    const producerRef     = useRef(null);   // mediasoup Producer
-    const initializedRef  = useRef(false);  // guard against double-init (StrictMode)
+    const localVideoRef    = useRef(null);
+    const deviceRef        = useRef(null);
+    const sendTransportRef = useRef(null);
+    const recvTransportRef = useRef(null);
+    const streamRef        = useRef(null);
+    const producersRef     = useRef([]);    // local producers
+    const consumersRef     = useRef([]);    // remote consumers
+    const initializedRef   = useRef(false);
 
     // ── UI state ──────────────────────────────────────────────────────────────
-    const [status, setStatus]     = useState("Connecting…");
-    const [isMuted, setIsMuted]   = useState(false);
-    const [isCamOff, setIsCamOff] = useState(false);
+    const [status, setStatus]             = useState("Connecting…");
+    const [isMuted, setIsMuted]           = useState(false);
+    const [isCamOff, setIsCamOff]         = useState(false);
+    const [remoteStreams, setRemoteStreams] = useState({}); // peerId -> MediaStream
+    const [peerCount, setPeerCount]       = useState(0);
 
-    // ── Main effect ───────────────────────────────────────────────────────────
+    // ── Helper: emit with ack (promisified socket callback) ──────────────────
+    function emitAsync(event, data = {}) {
+        return new Promise((resolve, reject) => {
+            socket.emit(event, data, (response) => {
+                if (response?.error) reject(new Error(response.error));
+                else resolve(response);
+            });
+        });
+    }
+
+    // ── Consume a remote producer ────────────────────────────────────────────
+    const consumeProducer = useCallback(async (producerId, peerId, kind) => {
+        try {
+            const device = deviceRef.current;
+            if (!device) return;
+
+            console.log(`[Room] Consuming ${kind} from peer ${peerId}`);
+
+            const consumerData = await emitAsync("consume", {
+                producerId,
+                rtpCapabilities: device.rtpCapabilities,
+            });
+
+            const recvTransport = recvTransportRef.current;
+            if (!recvTransport) {
+                console.error("[Room] No recv transport available");
+                return;
+            }
+
+            const consumer = await recvTransport.consume({
+                id: consumerData.id,
+                producerId: consumerData.producerId,
+                kind: consumerData.kind,
+                rtpParameters: consumerData.rtpParameters,
+            });
+
+            consumersRef.current.push(consumer);
+
+            // Add track to the remote peer's MediaStream
+            setRemoteStreams((prev) => {
+                const existing = prev[peerId] || new MediaStream();
+                existing.addTrack(consumer.track);
+                return { ...prev, [peerId]: existing };
+            });
+
+            // Resume the consumer (it was created paused)
+            await emitAsync("resume-consumer", { consumerId: consumer.id });
+
+            console.log(`[Room] ✅ Consuming ${kind} from ${peerId}`);
+        } catch (err) {
+            console.error(`[Room] Failed to consume ${kind} from ${peerId}:`, err);
+        }
+    }, []);
+
+    // ── Main initialization effect ───────────────────────────────────────────
     useEffect(() => {
         if (initializedRef.current) return;
         initializedRef.current = true;
 
-        console.log("[Room] Joined room:", roomId);
+        console.log("[Room] Initializing room:", roomId);
 
-        // Tell the server we are joining the room
-        socket.emit("join-room", roomId);
-
-        // Step 1 – receive RTP capabilities → load device → request transport
-        socket.on("router-rtp-capabilities", async (rtpCapabilities) => {
+        async function init() {
             try {
-                console.log("[Room] Received RTP capabilities");
-                setStatus("Loading device…");
+                // Step 1: Join the room and get RTP capabilities
+                setStatus("Joining room…");
+                const { rtpCapabilities } = await emitAsync("join-room", roomId);
+                console.log("[Room] Joined room, got RTP capabilities");
 
+                // Step 2: Load the mediasoup Device
+                setStatus("Loading device…");
                 const device = new mediasoupClient.Device();
                 await device.load({ routerRtpCapabilities: rtpCapabilities });
                 deviceRef.current = device;
                 console.log("[Room] Device loaded");
 
-                // Ask the server to create a WebRTC send transport
-                setStatus("Creating transport…");
-                socket.emit("create-transport");
-            } catch (err) {
-                console.error("[Room] Failed to load device:", err);
-                setStatus("❌ Device load failed");
-            }
-        });
+                // Step 3: Create send transport
+                setStatus("Setting up connection…");
+                const sendTransportParams = await emitAsync("create-send-transport");
+                const sendTransport = device.createSendTransport(sendTransportParams);
+                sendTransportRef.current = sendTransport;
 
-        // Step 2 – server returns transport params → create client-side transport
-        socket.on("transport-created", async (transportParams) => {
-            try {
-                console.log("[Room] Transport params received", transportParams);
-
-                const device    = deviceRef.current;
-                const transport = device.createSendTransport(transportParams);
-                transportRef.current = transport;
-
-                // Step 3 – called by mediasoup internally before first produce()
-                transport.on("connect", ({ dtlsParameters }, callback, errback) => {
-                    console.log("[Transport] connect event → sending dtlsParameters");
-                    socket.emit("connect-transport", {
-                        transportId: transport.id,
+                sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
+                    emitAsync("connect-transport", {
+                        transportId: sendTransport.id,
                         dtlsParameters,
-                    });
-                    socket.once("transport-connected", callback);
-                    socket.once("transport-connect-error", errback);
+                    })
+                        .then(() => callback())
+                        .catch(errback);
                 });
 
-                // Step 4 – called by mediasoup internally when produce() is called
-                transport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
-                    console.log("[Transport] produce event →", kind);
-                    socket.emit("produce", {
-                        transportId: transport.id,
+                sendTransport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
+                    emitAsync("produce", {
+                        transportId: sendTransport.id,
                         kind,
                         rtpParameters,
-                    });
-                    socket.once("producer-created", ({ id }) => callback({ id }));
-                    socket.once("produce-error", errback);
+                    })
+                        .then(({ id }) => callback({ id }))
+                        .catch(errback);
                 });
 
-                transport.on("connectionstatechange", (state) => {
-                    console.log("[Transport] connectionstatechange →", state);
+                sendTransport.on("connectionstatechange", (state) => {
+                    console.log("[SendTransport] State:", state);
                     if (state === "connected") setStatus("🟢 Live");
-                    if (state === "failed")    setStatus("❌ Connection failed");
-                    if (state === "closed")    setStatus("🔴 Disconnected");
+                    if (state === "failed") setStatus("❌ Connection failed");
                 });
 
-                // Now capture media and produce
-                await startLocalMedia(transport);
+                // Step 4: Create recv transport
+                const recvTransportParams = await emitAsync("create-recv-transport");
+                const recvTransport = device.createRecvTransport(recvTransportParams);
+                recvTransportRef.current = recvTransport;
+
+                recvTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
+                    emitAsync("connect-transport", {
+                        transportId: recvTransport.id,
+                        dtlsParameters,
+                    })
+                        .then(() => callback())
+                        .catch(errback);
+                });
+
+                recvTransport.on("connectionstatechange", (state) => {
+                    console.log("[RecvTransport] State:", state);
+                });
+
+                // Step 5: Capture local media and produce audio + video
+                setStatus("Requesting camera & mic…");
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 30 },
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                    },
+                });
+
+                streamRef.current = stream;
+
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                }
+
+                // Produce VIDEO
+                const videoTrack = stream.getVideoTracks()[0];
+                if (videoTrack) {
+                    const videoProducer = await sendTransport.produce({ track: videoTrack });
+                    producersRef.current.push(videoProducer);
+                    videoProducer.on("trackended", () => console.warn("[Producer] Video track ended"));
+                    videoProducer.on("transportclose", () => console.warn("[Producer] Send transport closed"));
+                    console.log("[Room] Video producer created:", videoProducer.id);
+                }
+
+                // Produce AUDIO
+                const audioTrack = stream.getAudioTracks()[0];
+                if (audioTrack) {
+                    const audioProducer = await sendTransport.produce({ track: audioTrack });
+                    producersRef.current.push(audioProducer);
+                    audioProducer.on("trackended", () => console.warn("[Producer] Audio track ended"));
+                    audioProducer.on("transportclose", () => console.warn("[Producer] Send transport closed"));
+                    console.log("[Room] Audio producer created:", audioProducer.id);
+                }
+
+                setStatus("🟢 Live");
+
+                // Step 6: Consume existing producers in the room
+                const { producers } = await emitAsync("get-producers");
+                setPeerCount(new Set(producers.map((p) => p.peerId)).size);
+
+                for (const { producerId, peerId, kind } of producers) {
+                    await consumeProducer(producerId, peerId, kind);
+                }
+
+                console.log("[Room] ✅ Fully initialized");
             } catch (err) {
-                console.error("[Room] Transport setup failed:", err);
-                setStatus("❌ Transport setup failed");
-            }
-        });
-
-        // Cleanup on unmount
-        return () => {
-            socket.off("router-rtp-capabilities");
-            socket.off("transport-created");
-            socket.off("transport-connected");
-            socket.off("producer-created");
-
-            // Stop all local tracks
-            streamRef.current?.getTracks().forEach((t) => t.stop());
-            producerRef.current?.close();
-            transportRef.current?.close();
-            console.log("[Room] Cleaned up");
-        };
-    }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Capture local media & connect video element ───────────────────────────
-    async function startLocalMedia(transport) {
-        try {
-            setStatus("Requesting camera…");
-            console.log("[Media] Requesting getUserMedia…");
-
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-                audio: true,
-            });
-
-            streamRef.current = stream;
-
-            // Attach to the <video> element
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
-
-            console.log("[Media] Stream acquired, starting produce…");
-            setStatus("Producing…");
-
-            const videoTrack = stream.getVideoTracks()[0];
-            const producer   = await transport.produce({ track: videoTrack });
-            producerRef.current = producer;
-
-            producer.on("trackended",  () => console.warn("[Producer] track ended"));
-            producer.on("transportclose", () => console.warn("[Producer] transport closed"));
-
-            console.log("[Media] Producer created:", producer.id);
-            // Status will be updated by transport connectionstatechange → "🟢 Live"
-        } catch (err) {
-            if (
-                err.name === "NotAllowedError" ||
-                err.name === "PermissionDeniedError"
-            ) {
-                console.error("[Media] Camera/mic permission denied");
-                setStatus("❌ Camera permission denied");
-            } else {
-                console.error("[Media] getUserMedia / produce error:", err);
-                setStatus("❌ Media error: " + err.message);
+                if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                    setStatus("❌ Camera/mic permission denied");
+                } else {
+                    console.error("[Room] Init error:", err);
+                    setStatus("❌ " + err.message);
+                }
             }
         }
-    }
+
+        // ── Listen for new producers from other peers ────────────────────────
+        socket.on("new-producer", async ({ producerId, peerId, kind }) => {
+            console.log(`[Room] New producer from peer ${peerId}: ${kind}`);
+            setPeerCount((prev) => prev + (kind === "video" ? 1 : 0)); // count by video
+            await consumeProducer(producerId, peerId, kind);
+        });
+
+        // ── Listen for peers joining (they haven't produced yet) ─────────────
+        socket.on("new-peer", ({ peerId }) => {
+            console.log(`[Room] New peer joined: ${peerId}`);
+        });
+
+        // ── Listen for peers leaving ─────────────────────────────────────────
+        socket.on("peer-left", ({ peerId }) => {
+            console.log(`[Room] Peer left: ${peerId}`);
+            setRemoteStreams((prev) => {
+                const updated = { ...prev };
+                delete updated[peerId];
+                return updated;
+            });
+            setPeerCount((prev) => Math.max(0, prev - 1));
+        });
+
+        // ── Listen for producer being closed ─────────────────────────────────
+        socket.on("producer-closed", ({ producerId }) => {
+            console.log(`[Room] Producer closed: ${producerId}`);
+            consumersRef.current = consumersRef.current.filter(
+                (c) => c.producerId !== producerId
+            );
+        });
+
+        init();
+
+        // ── Cleanup on unmount ───────────────────────────────────────────────
+        return () => {
+            socket.off("new-producer");
+            socket.off("new-peer");
+            socket.off("peer-left");
+            socket.off("producer-closed");
+
+            streamRef.current?.getTracks().forEach((t) => t.stop());
+            producersRef.current.forEach((p) => p.close());
+            consumersRef.current.forEach((c) => c.close());
+            sendTransportRef.current?.close();
+            recvTransportRef.current?.close();
+
+            console.log("[Room] Cleaned up");
+        };
+    }, [roomId, consumeProducer]);
 
     // ── Toggle helpers ────────────────────────────────────────────────────────
     function toggleMute() {
@@ -175,6 +280,26 @@ function Room() {
         setIsCamOff((prev) => !prev);
     }
 
+    function handleLeave() {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        producersRef.current.forEach((p) => p.close());
+        consumersRef.current.forEach((c) => c.close());
+        sendTransportRef.current?.close();
+        recvTransportRef.current?.close();
+        navigate("/");
+    }
+
+    // ── Compute grid layout class based on participant count ─────────────────
+    const totalParticipants = 1 + Object.keys(remoteStreams).length;
+    const gridClass =
+        totalParticipants <= 1
+            ? "grid-1"
+            : totalParticipants <= 2
+            ? "grid-2"
+            : totalParticipants <= 4
+            ? "grid-4"
+            : "grid-many";
+
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <div className="room-container">
@@ -184,17 +309,38 @@ function Room() {
                 <div className="room-id-badge">
                     <span className="room-id-label">Room</span>
                     <span className="room-id-value">{roomId}</span>
+                    <button
+                        className="copy-btn"
+                        onClick={() => {
+                            navigator.clipboard.writeText(roomId);
+                        }}
+                        title="Copy Room ID"
+                    >
+                        📋
+                    </button>
                 </div>
-                <div className={`status-pill ${status.startsWith("🟢") ? "live" : status.startsWith("❌") ? "error" : "pending"}`}>
+                <div className="peer-count">
+                    👥 {totalParticipants}
+                </div>
+                <div
+                    className={`status-pill ${
+                        status.startsWith("🟢")
+                            ? "live"
+                            : status.startsWith("❌")
+                            ? "error"
+                            : "pending"
+                    }`}
+                >
                     {status}
                 </div>
             </header>
 
             {/* Video stage */}
-            <main className="video-stage">
-                <div className="video-card">
+            <main className={`video-stage ${gridClass}`}>
+                {/* Local video */}
+                <div className="video-card local">
                     <video
-                        ref={videoRef}
+                        ref={localVideoRef}
                         autoPlay
                         playsInline
                         muted
@@ -206,8 +352,17 @@ function Room() {
                             <p>Camera Off</p>
                         </div>
                     )}
-                    <div className="video-label">You (local)</div>
+                    <div className="video-label">You</div>
                 </div>
+
+                {/* Remote videos */}
+                {Object.entries(remoteStreams).map(([peerId, stream]) => (
+                    <RemoteVideo
+                        key={peerId}
+                        peerId={peerId}
+                        stream={stream}
+                    />
+                ))}
             </main>
 
             {/* Controls */}
@@ -231,7 +386,37 @@ function Room() {
                     {isCamOff ? "📷" : "📹"}
                     <span>{isCamOff ? "Cam On" : "Cam Off"}</span>
                 </button>
+
+                <button
+                    className="ctrl-btn leave"
+                    onClick={handleLeave}
+                    title="Leave meeting"
+                    id="btn-leave"
+                >
+                    📞
+                    <span>Leave</span>
+                </button>
             </footer>
+        </div>
+    );
+}
+
+// ── Remote video component ───────────────────────────────────────────────────
+function RemoteVideo({ peerId, stream }) {
+    const videoRef = useRef(null);
+
+    useEffect(() => {
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+        }
+    }, [stream]);
+
+    return (
+        <div className="video-card remote">
+            <video ref={videoRef} autoPlay playsInline />
+            <div className="video-label">
+                Peer {peerId.slice(0, 6)}
+            </div>
         </div>
     );
 }
