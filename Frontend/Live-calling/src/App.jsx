@@ -54,11 +54,6 @@ function App() {
 
     return (
         <div className="landing-container">
-            {/* Decorative background orbs */}
-            <div className="bg-orb orb-1" />
-            <div className="bg-orb orb-2" />
-            <div className="bg-orb orb-3" />
-
             <div className="landing-card">
                 <h1 className="landing-title">Verve</h1>
                 <p className="landing-subtitle">
