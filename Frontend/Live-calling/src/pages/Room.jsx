@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+// Chat uses socket events: send-message, new-message, get-chat-history
 import { useParams, useNavigate } from "react-router-dom";
 import { socket } from "../App";
 import * as mediasoupClient from "mediasoup-client";
@@ -24,6 +25,25 @@ function Room() {
     const [isCamOff, setIsCamOff]         = useState(false);
     const [remoteStreams, setRemoteStreams] = useState({}); // peerId -> MediaStream
     const [peerCount, setPeerCount]       = useState(0);
+
+    // ── Chat state ───────────────────────────────────────────────────────────
+    const [chatOpen, setChatOpen]         = useState(false);
+    const [chatMessages, setChatMessages] = useState([]);
+    const [chatInput, setChatInput]       = useState("");
+    const [unreadCount, setUnreadCount]   = useState(0);
+    const chatEndRef                      = useRef(null);
+
+    // ── Participants state ────────────────────────────────────────────────────
+    const [participantsOpen, setParticipantsOpen] = useState(false);
+    const [peersList, setPeersList]               = useState([]);
+
+    // ── Screen sharing state ────────────────────────────────────────────────
+    const [isScreenSharing, setIsScreenSharing]   = useState(false);
+    const screenProducerRef                       = useRef(null);
+
+    // ── Raise hand state ────────────────────────────────────────────────────
+    const [raisedHands, setRaisedHands] = useState({}); // peerId -> true
+    const raiseTimerRef                = useRef(null);
 
     // ── Helper: emit with ack (promisified socket callback) ──────────────────
     function emitAsync(event, data = {}) {
@@ -200,6 +220,10 @@ function Room() {
                     await consumeProducer(producerId, peerId, kind);
                 }
 
+                // Step 7: Fetch chat history
+                const { messages } = await emitAsync("get-chat-history");
+                if (messages?.length) setChatMessages(messages);
+
                 console.log("[Room] ✅ Fully initialized");
             } catch (err) {
                 if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
@@ -242,6 +266,32 @@ function Room() {
             );
         });
 
+        // ── Listen for chat messages ─────────────────────────────────────────
+        socket.on("new-message", (msg) => {
+            setChatMessages((prev) => [...prev, msg]);
+            // Increment unread if chat panel is closed
+            setChatOpen((open) => {
+                if (!open) setUnreadCount((c) => c + 1);
+                return open;
+            });
+        });
+
+        // ── Listen for peers list updates ────────────────────────────────────
+        socket.on("peers-list", ({ peers }) => {
+            setPeersList(peers);
+            setPeerCount(peers.length);
+        });
+
+        // ── Listen for raise hand ─────────────────────────────────────────
+        socket.on("hand-raised", ({ peerId, raised }) => {
+            setRaisedHands((prev) => {
+                const updated = { ...prev };
+                if (raised) updated[peerId] = true;
+                else delete updated[peerId];
+                return updated;
+            });
+        });
+
         init();
 
         // ── Cleanup on unmount ───────────────────────────────────────────────
@@ -250,6 +300,9 @@ function Room() {
             socket.off("new-peer");
             socket.off("peer-left");
             socket.off("producer-closed");
+            socket.off("new-message");
+            socket.off("peers-list");
+            socket.off("hand-raised");
 
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
@@ -284,10 +337,95 @@ function Room() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         producersRef.current.forEach((p) => p.close());
         consumersRef.current.forEach((c) => c.close());
+        screenProducerRef.current?.close();
         sendTransportRef.current?.close();
         recvTransportRef.current?.close();
         navigate("/");
     }
+
+    // ── Screen sharing ───────────────────────────────────────────────────────
+    async function toggleScreenShare() {
+        if (isScreenSharing) {
+            // Stop screen share
+            screenProducerRef.current?.close();
+            screenProducerRef.current = null;
+            setIsScreenSharing(false);
+            return;
+        }
+
+        try {
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { cursor: "always" },
+                audio: false,
+            });
+
+            const screenTrack = screenStream.getVideoTracks()[0];
+            const sendTransport = sendTransportRef.current;
+            if (!sendTransport || !screenTrack) return;
+
+            const screenProducer = await sendTransport.produce({
+                track: screenTrack,
+                appData: { type: "screen" },
+            });
+
+            screenProducerRef.current = screenProducer;
+            setIsScreenSharing(true);
+
+            // Auto-stop when user clicks browser's native "Stop sharing" button
+            screenTrack.onended = () => {
+                screenProducer.close();
+                screenProducerRef.current = null;
+                setIsScreenSharing(false);
+            };
+        } catch (err) {
+            // User cancelled the screen picker — not an error
+            if (err.name !== "NotAllowedError") {
+                console.error("[Room] Screen share error:", err);
+            }
+        }
+    }
+
+    // ── Raise hand ────────────────────────────────────────────────────────────
+    const myHandRaised = raisedHands[socket.id] || false;
+
+    function toggleRaiseHand() {
+        const newState = !myHandRaised;
+        socket.emit("raise-hand", { raised: newState });
+        // Auto-lower after 30 seconds
+        if (raiseTimerRef.current) clearTimeout(raiseTimerRef.current);
+        if (newState) {
+            raiseTimerRef.current = setTimeout(() => {
+                socket.emit("raise-hand", { raised: false });
+            }, 30000);
+        }
+    }
+
+    // ── Chat helpers ──────────────────────────────────────────────────────────
+    function handleSendMessage() {
+        const text = chatInput.trim();
+        if (!text) return;
+        emitAsync("send-message", { message: text }).catch(console.error);
+        setChatInput("");
+    }
+
+    function handleChatKeyDown(e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSendMessage();
+        }
+    }
+
+    function toggleChat() {
+        setChatOpen((prev) => {
+            if (!prev) setUnreadCount(0); // clear unread when opening
+            return !prev;
+        });
+    }
+
+    // Auto-scroll chat to bottom
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [chatMessages]);
 
     // ── Compute grid layout class based on participant count ─────────────────
     const totalParticipants = 1 + Object.keys(remoteStreams).length;
@@ -353,6 +491,7 @@ function Room() {
                         </div>
                     )}
                     <div className="video-label">You</div>
+                    {raisedHands[socket.id] && <div className="hand-badge">✋</div>}
                 </div>
 
                 {/* Remote videos */}
@@ -361,9 +500,76 @@ function Room() {
                         key={peerId}
                         peerId={peerId}
                         stream={stream}
+                        handRaised={!!raisedHands[peerId]}
                     />
                 ))}
             </main>
+
+            {/* Chat Panel */}
+            <div className={`chat-panel ${chatOpen ? "open" : ""}`}>
+                <div className="chat-header">
+                    <span>Chat</span>
+                    <button className="chat-close" onClick={toggleChat}>✕</button>
+                </div>
+                <div className="chat-messages">
+                    {chatMessages.length === 0 && (
+                        <p className="chat-empty">No messages yet. Say hi! 👋</p>
+                    )}
+                    {chatMessages.map((msg, i) => (
+                        <div
+                            key={i}
+                            className={`chat-bubble ${msg.peerId === socket.id ? "self" : ""}`}
+                        >
+                            <span className="chat-sender">
+                                {msg.peerId === socket.id ? "You" : `Peer ${msg.peerId.slice(0, 6)}`}
+                            </span>
+                            <p className="chat-text">{msg.message}</p>
+                            <span className="chat-time">
+                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                        </div>
+                    ))}
+                    <div ref={chatEndRef} />
+                </div>
+                <div className="chat-input-group">
+                    <input
+                        type="text"
+                        placeholder="Type a message…"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={handleChatKeyDown}
+                        id="chat-input"
+                    />
+                    <button
+                        className="chat-send-btn"
+                        onClick={handleSendMessage}
+                        disabled={!chatInput.trim()}
+                    >
+                        ➤
+                    </button>
+                </div>
+            </div>
+
+            {/* Participants Panel */}
+            <div className={`participants-panel ${participantsOpen ? "open" : ""}`}>
+                <div className="chat-header">
+                    <span>Participants ({peersList.length})</span>
+                    <button className="chat-close" onClick={() => setParticipantsOpen(false)}>✕</button>
+                </div>
+                <div className="participants-list">
+                    {peersList.map((pid) => (
+                        <div key={pid} className="participant-item">
+                            <div className="participant-avatar">
+                                {pid === socket.id ? "Y" : pid.slice(0, 1).toUpperCase()}
+                            </div>
+                            <span className="participant-name">
+                                {pid === socket.id ? "You" : `Peer ${pid.slice(0, 6)}`}
+                            </span>
+                            {pid === socket.id && <span className="participant-you-tag">You</span>}
+                        </div>
+                    ))}
+                </div>
+            </div>
 
             {/* Controls */}
             <footer className="room-controls">
@@ -388,6 +594,49 @@ function Room() {
                 </button>
 
                 <button
+                    className={`ctrl-btn ${chatOpen ? "active" : ""}`}
+                    onClick={toggleChat}
+                    title="Toggle chat"
+                    id="btn-toggle-chat"
+                >
+                    💬
+                    <span>Chat</span>
+                    {unreadCount > 0 && (
+                        <span className="unread-badge">{unreadCount}</span>
+                    )}
+                </button>
+
+                <button
+                    className={`ctrl-btn ${isScreenSharing ? "active" : ""}`}
+                    onClick={toggleScreenShare}
+                    title={isScreenSharing ? "Stop sharing" : "Share screen"}
+                    id="btn-toggle-screen"
+                >
+                    {isScreenSharing ? "🗕" : "💻"}
+                    <span>{isScreenSharing ? "Stop" : "Share"}</span>
+                </button>
+
+                <button
+                    className={`ctrl-btn ${participantsOpen ? "active" : ""}`}
+                    onClick={() => setParticipantsOpen((prev) => !prev)}
+                    title="Toggle participants"
+                    id="btn-toggle-participants"
+                >
+                    👥
+                    <span>People</span>
+                </button>
+
+                <button
+                    className={`ctrl-btn ${myHandRaised ? "active" : ""}`}
+                    onClick={toggleRaiseHand}
+                    title={myHandRaised ? "Lower hand" : "Raise hand"}
+                    id="btn-raise-hand"
+                >
+                    ✋
+                    <span>{myHandRaised ? "Lower" : "Raise"}</span>
+                </button>
+
+                <button
                     className="ctrl-btn leave"
                     onClick={handleLeave}
                     title="Leave meeting"
@@ -402,7 +651,7 @@ function Room() {
 }
 
 // ── Remote video component ───────────────────────────────────────────────────
-function RemoteVideo({ peerId, stream }) {
+function RemoteVideo({ peerId, stream, handRaised }) {
     const videoRef = useRef(null);
 
     useEffect(() => {
@@ -417,6 +666,7 @@ function RemoteVideo({ peerId, stream }) {
             <div className="video-label">
                 Peer {peerId.slice(0, 6)}
             </div>
+            {handRaised && <div className="hand-badge">✋</div>}
         </div>
     );
 }
