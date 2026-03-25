@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const mediasoup = require("mediasoup");
 const express = require("express");
 const http = require("http");
@@ -6,10 +8,14 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 const server = http.createServer(app);
 
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const SERVER_IP    = process.env.SERVER_IP || "127.0.0.1";
+const PORT         = process.env.PORT || 5000;
+
 const { Server } = require("socket.io");
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5173",
+        origin: FRONTEND_URL,
         methods: ["GET", "POST"],
     },
 });
@@ -79,7 +85,7 @@ function getOrCreatePeer(roomId, socketId) {
 // Helper to create a WebRTC transport with common options
 async function createWebRtcTransport(router) {
     const transport = await router.createWebRtcTransport({
-        listenIps: [{ ip: "0.0.0.0", announcedIp: "127.0.0.1" }],
+        listenIps: [{ ip: "0.0.0.0", announcedIp: SERVER_IP }],
         enableUdp: true,
         enableTcp: true,
         preferUdp: true,
@@ -120,6 +126,7 @@ io.on("connection", (socket) => {
                 rooms.set(roomId, {
                     router,
                     peers: new Map(),
+                    chatHistory: [],
                 });
                 console.log(`📦 Room ${roomId} created`);
             }
@@ -136,6 +143,10 @@ io.on("connection", (socket) => {
 
             // Notify existing peers that someone new joined
             socket.to(roomId).emit("new-peer", { peerId: socket.id });
+
+            // Broadcast updated peers list to everyone
+            const peerIds = Array.from(room.peers.keys());
+            io.to(roomId).emit("peers-list", { peers: peerIds });
         } catch (err) {
             console.error("join-room error:", err);
             callback({ error: err.message });
@@ -346,6 +357,58 @@ io.on("connection", (socket) => {
     });
 
     // ┌──────────────────────────────────────────────────────────────────────┐
+    // │  CHAT                                                                │
+    // └──────────────────────────────────────────────────────────────────────┘
+    socket.on("send-message", ({ message }, callback) => {
+        try {
+            const room = rooms.get(socket.roomId);
+            if (!room) return callback?.({ error: "Room not found" });
+
+            const chatMessage = {
+                peerId: socket.id,
+                message,
+                timestamp: Date.now(),
+            };
+
+            // Store in history (cap at 200)
+            room.chatHistory.push(chatMessage);
+            if (room.chatHistory.length > 200) {
+                room.chatHistory = room.chatHistory.slice(-200);
+            }
+
+            // Broadcast to everyone in the room (including sender)
+            io.to(socket.roomId).emit("new-message", chatMessage);
+
+            callback?.({ sent: true });
+        } catch (err) {
+            console.error("send-message error:", err);
+            callback?.({ error: err.message });
+        }
+    });
+
+    socket.on("get-chat-history", (_, callback) => {
+        try {
+            const room = rooms.get(socket.roomId);
+            if (!room) return callback({ error: "Room not found" });
+            callback({ messages: room.chatHistory });
+        } catch (err) {
+            console.error("get-chat-history error:", err);
+            callback({ error: err.message });
+        }
+    });
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │  RAISE HAND                                                          │
+    // └──────────────────────────────────────────────────────────────────────┘
+    socket.on("raise-hand", ({ raised }) => {
+        if (!socket.roomId) return;
+        io.to(socket.roomId).emit("hand-raised", {
+            peerId: socket.id,
+            raised,
+        });
+    });
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
     // │  DISCONNECT                                                         │
     // └──────────────────────────────────────────────────────────────────────┘
     socket.on("disconnect", () => {
@@ -370,6 +433,10 @@ io.on("connection", (socket) => {
             // Notify others
             socket.to(socket.roomId).emit("peer-left", { peerId: socket.id });
 
+            // Broadcast updated peers list
+            const peerIds = Array.from(room.peers.keys());
+            io.to(socket.roomId).emit("peers-list", { peers: peerIds });
+
             // Clean up empty rooms
             if (room.peers.size === 0) {
                 room.router.close();
@@ -383,8 +450,8 @@ io.on("connection", (socket) => {
 // ── Start server ────────────────────────────────────────────────────────────
 createWorker()
     .then(() => {
-        server.listen(5000, () => {
-            console.log("🚀 Server running on http://localhost:5000");
+        server.listen(PORT, () => {
+            console.log(`🚀 Server running on http://localhost:${PORT}`);
         });
     })
     .catch((err) => {
