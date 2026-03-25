@@ -3,7 +3,7 @@ import "./App.css";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-export const socket = io("http://localhost:5000");
+export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000");
 
 function App() {
     const [roomId, setRoomId] = useState("");
