@@ -3,6 +3,7 @@ require("dotenv").config();
 const mediasoup = require("mediasoup");
 const express = require("express");
 const http = require("http");
+const cors = require("cors");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
@@ -12,6 +13,14 @@ const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const SERVER_IP    = process.env.SERVER_IP || "127.0.0.1";
 const PORT         = process.env.PORT || 5000;
 
+// ── Express middleware ──────────────────────────────────────────────────────
+app.use(cors({ origin: FRONTEND_URL }));
+app.use(express.json());
+
+app.get("/", (req, res) => {
+    res.send("Server is running");
+});
+
 const { Server } = require("socket.io");
 const io = new Server(server, {
     cors: {
@@ -20,9 +29,6 @@ const io = new Server(server, {
     },
 });
 
-app.get("/", (req, res) => {
-    res.send("Server is running");
-});
 
 // ── Mediasoup worker ────────────────────────────────────────────────────────
 let worker;
@@ -455,5 +461,6 @@ createWorker()
         });
     })
     .catch((err) => {
-        console.error("Failed to create mediasoup worker:", err);
+        console.error("Failed to start server:", err);
+        process.exit(1);
     });
