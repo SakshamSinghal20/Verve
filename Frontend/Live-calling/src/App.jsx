@@ -1,16 +1,25 @@
 import { io } from "socket.io-client";
 import "./App.css";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 
-export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000");
+// Connect socket with auth token if available
+const token = localStorage.getItem("verve-token");
+export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
+    auth: token ? { token } : {},
+});
 
 function App() {
     const [roomId, setRoomId] = useState("");
     const [connected, setConnected] = useState(false);
     const navigate = useNavigate();
 
-    // Generate a short random room ID
+    // Auth state
+    const [user, setUser] = useState(() => {
+        const stored = localStorage.getItem("verve-user");
+        return stored ? JSON.parse(stored) : null;
+    });
+
     function generateRoomId() {
         const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
         let id = "";
@@ -33,6 +42,13 @@ function App() {
 
     const handleKeyDown = (e) => {
         if (e.key === "Enter") handleJoin();
+    };
+
+    const handleLogout = () => {
+        localStorage.removeItem("verve-token");
+        localStorage.removeItem("verve-user");
+        setUser(null);
+        window.location.reload();
     };
 
     useEffect(() => {
@@ -59,6 +75,15 @@ function App() {
                 <p className="landing-subtitle">
                     Crystal-clear video calls, instantly.
                 </p>
+
+                {user && (
+                    <div className="user-badge">
+                        <span className="user-name">👋 {user.name}</span>
+                        <button className="btn-logout" onClick={handleLogout}>
+                            Logout
+                        </button>
+                    </div>
+                )}
 
                 <div className="landing-actions">
                     <button
@@ -94,9 +119,19 @@ function App() {
                     </div>
                 </div>
 
-                <div className={`connection-indicator ${connected ? "online" : "offline"}`}>
-                    <span className="dot" />
-                    {connected ? "Connected to server" : "Connecting…"}
+                <div className="landing-footer">
+                    <div className={`connection-indicator ${connected ? "online" : "offline"}`}>
+                        <span className="dot" />
+                        {connected ? "Connected to server" : "Connecting…"}
+                    </div>
+
+                    {!user && (
+                        <div className="auth-links">
+                            <Link to="/login">Sign In</Link>
+                            <span className="auth-sep">•</span>
+                            <Link to="/register">Register</Link>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

@@ -1,0 +1,108 @@
+/* ── Auth pages (Login / Register) ────────────────────── */
+.auth-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    background: #000;
+    padding: 1rem;
+}
+
+.auth-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    padding: 2.5rem 2rem;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    background: #0a0a0a;
+    max-width: 380px;
+    width: 100%;
+}
+
+.auth-logo {
+    font-size: 2.4rem;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -1px;
+    text-align: center;
+    margin: 0;
+}
+
+.auth-subtitle {
+    font-size: 0.88rem;
+    color: #555;
+    text-align: center;
+    margin: -0.4rem 0 0;
+}
+
+.auth-error {
+    font-size: 0.8rem;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+    padding: 0.5rem 0.7rem;
+    text-align: center;
+}
+
+.auth-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.auth-field label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.auth-field input {
+    padding: 0.7rem 0.8rem;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    background: #111;
+    color: #fff;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.auth-field input::placeholder { color: #444; }
+.auth-field input:focus { border-color: #555; }
+
+.auth-btn {
+    padding: 0.8rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    background: #fff;
+    color: #000;
+    font-size: 0.9rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-top: 0.3rem;
+}
+
+.auth-btn:hover { background: #ddd; }
+.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.auth-link {
+    font-size: 0.78rem;
+    color: #555;
+    text-align: center;
+    margin: 0;
+}
+
+.auth-link a {
+    color: #bbb;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.auth-link a:hover { color: #fff; }
