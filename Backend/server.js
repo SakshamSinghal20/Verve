@@ -4,7 +4,10 @@ const mediasoup = require("mediasoup");
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
+const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
+const authRoutes = require("./routes/auth");
+const { socketAuthMiddleware } = require("./middleware/auth");
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +23,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
     res.send("Server is running");
 });
+app.use("/api/auth", authRoutes);
 
 const { Server } = require("socket.io");
 const io = new Server(server, {
@@ -29,7 +33,8 @@ const io = new Server(server, {
     },
 });
 
-
+// ── Socket.io auth middleware ───────────────────────────────────────────────
+io.use(socketAuthMiddleware);
 // ── Mediasoup worker ────────────────────────────────────────────────────────
 let worker;
 
@@ -454,13 +459,28 @@ io.on("connection", (socket) => {
 });
 
 // ── Start server ────────────────────────────────────────────────────────────
-createWorker()
-    .then(() => {
-        server.listen(PORT, () => {
-            console.log(`🚀 Server running on http://localhost:${PORT}`);
-        });
-    })
-    .catch((err) => {
-        console.error("Failed to start server:", err);
-        process.exit(1);
+async function startServer() {
+    // Connect to MongoDB
+    const MONGO_URI = process.env.MONGO_URI;
+    if (MONGO_URI) {
+        try {
+            await mongoose.connect(MONGO_URI);
+            console.log("✅ Connected to MongoDB");
+        } catch (err) {
+            console.error("❌ MongoDB connection failed:", err.message);
+        }
+    } else {
+        console.warn("⚠️  No MONGO_URI set — auth features disabled");
+    }
+
+    await createWorker();
+
+    server.listen(PORT, () => {
+        console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
+}
+
+startServer().catch((err) => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+});
