@@ -1,4 +1,3 @@
-// ============================================================
 //  Room.jsx — The actual video call screen
 //
 //  What this file does:
@@ -7,7 +6,6 @@
 //   3. Captures the local camera/mic and sends it to the server
 //   4. Subscribes to all other participants' streams
 //   5. Handles chat, screen share, raise hand, and participants list
-// ============================================================
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -17,48 +15,48 @@ import "./Room.css";
 
 function Room() {
     const { roomId } = useParams(); // grab the room ID from the URL (e.g. /room/abc123)
-    const navigate   = useNavigate();
+    const navigate = useNavigate();
 
-    // ── Refs ──────────────────────────────────────────────────────────────────
+    // ── Refs 
     // Refs hold values that shouldn't trigger re-renders when they change.
     // Mediasoup objects (transports, producers, consumers) live here.
-    const localVideoRef    = useRef(null);  // <video> element for your own camera
-    const deviceRef        = useRef(null);  // Mediasoup Device — negotiates codecs with the server
+    const localVideoRef = useRef(null);  // <video> element for your own camera
+    const deviceRef = useRef(null);  // Mediasoup Device — negotiates codecs with the server
     const sendTransportRef = useRef(null);  // upload pipe: your media → server
     const recvTransportRef = useRef(null);  // download pipe: server → your screen
-    const streamRef        = useRef(null);  // your raw camera/mic MediaStream
-    const producersRef     = useRef([]);    // your outgoing media producers (video + audio)
-    const consumersRef     = useRef([]);    // incoming consumers (one per remote stream)
-    const initializedRef   = useRef(false); // guard so we don't run setup twice
+    const streamRef = useRef(null);  // your raw camera/mic MediaStream
+    const producersRef = useRef([]);    // your outgoing media producers (video + audio)
+    const consumersRef = useRef([]);    // incoming consumers (one per remote stream)
+    const initializedRef = useRef(false); // guard so we don't run setup twice
 
-    // ── UI state ──────────────────────────────────────────────────────────────
+    // ── UI state 
     // These values drive what the user sees.
-    const [status, setStatus]              = useState("Connecting…");  // status pill in the header
-    const [isMuted, setIsMuted]            = useState(false);           // microphone on/off
-    const [isCamOff, setIsCamOff]          = useState(false);           // camera on/off
+    const [status, setStatus] = useState("Connecting…");  // status pill in the header
+    const [isMuted, setIsMuted] = useState(false);           // microphone on/off
+    const [isCamOff, setIsCamOff] = useState(false);           // camera on/off
     const [remoteStreams, setRemoteStreams] = useState({});              // peerId → MediaStream
-    const [peerCount, setPeerCount]        = useState(0);               // total number of people in room
+    const [peerCount, setPeerCount] = useState(0);               // total number of people in room
 
-    // ── Chat state ───────────────────────────────────────────────────────────
-    const [chatOpen, setChatOpen]         = useState(false);
+    // ── Chat state 
+    const [chatOpen, setChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState([]);
-    const [chatInput, setChatInput]       = useState("");
-    const [unreadCount, setUnreadCount]   = useState(0); // badge on chat button when panel is closed
-    const chatEndRef                      = useRef(null); // used to auto-scroll to newest message
+    const [chatInput, setChatInput] = useState("");
+    const [unreadCount, setUnreadCount] = useState(0); // badge on chat button when panel is closed
+    const chatEndRef = useRef(null); // used to auto-scroll to newest message
 
-    // ── Participants panel state ───────────────────────────────────────────────
+    // ── Participants panel state 
     const [participantsOpen, setParticipantsOpen] = useState(false);
-    const [peersList, setPeersList]               = useState([]); // list of socket IDs in the room
+    const [peersList, setPeersList] = useState([]); // list of socket IDs in the room
 
-    // ── Screen sharing state ─────────────────────────────────────────────────
+    // ── Screen sharing state 
     const [isScreenSharing, setIsScreenSharing] = useState(false);
-    const screenProducerRef                     = useRef(null); // the screen share Mediasoup producer
+    const screenProducerRef = useRef(null); // the screen share Mediasoup producer
 
-    // ── Raise hand state ──────────────────────────────────────────────────────
+    // ── Raise hand state 
     const [raisedHands, setRaisedHands] = useState({}); // peerId → true/false
-    const raiseTimerRef                 = useRef(null);  // auto-lower timer handle
+    const raiseTimerRef = useRef(null);  // auto-lower timer handle
 
-    // ── Utility: promisified socket.emit ──────────────────────────────────────
+    // ── Utility: promisified socket.emit 
     // Socket.IO callbacks don't work well with async/await out of the box.
     // This wrapper converts the callback pattern into a Promise so we can use await.
     function emitAsync(event, data = {}) {
@@ -70,7 +68,7 @@ function Room() {
         });
     }
 
-    // ── Subscribe to a remote peer's media stream ─────────────────────────────
+    // ── Subscribe to a remote peer's media stream 
     // "Consuming" = telling the server "give me that person's video/audio".
     // We get back a consumer object whose .track we attach to a <video> element.
     const consumeProducer = useCallback(async (producerId, peerId, kind) => {
@@ -94,9 +92,9 @@ function Room() {
 
             // Create the browser-side consumer on our recv transport
             const consumer = await recvTransport.consume({
-                id:            consumerData.id,
-                producerId:    consumerData.producerId,
-                kind:          consumerData.kind,
+                id: consumerData.id,
+                producerId: consumerData.producerId,
+                kind: consumerData.kind,
                 rtpParameters: consumerData.rtpParameters,
             });
 
@@ -119,7 +117,7 @@ function Room() {
         }
     }, []);
 
-    // ── Main setup effect — runs once when the component mounts ───────────────
+    // ── Main setup effect — runs once when the component mounts
     useEffect(() => {
         // Guard: don't initialize twice (React StrictMode can call effects twice in dev)
         if (initializedRef.current) return;
@@ -129,13 +127,13 @@ function Room() {
 
         async function init() {
             try {
-                // ── Step 1: Join the room ────────────────────────────────────
+                // ── Step 1: Join the room 
                 // The server creates the room if needed and gives us its RTP capabilities.
                 setStatus("Joining room…");
                 const { rtpCapabilities } = await emitAsync("join-room", roomId);
                 console.log("[Room] Joined room, got RTP capabilities");
 
-                // ── Step 2: Load the Mediasoup Device ────────────────────────
+                // ── Step 2: Load the Mediasoup Device 
                 // The Device is the browser-side Mediasoup object that knows which
                 // codecs to use based on what the server router supports.
                 setStatus("Loading device…");
@@ -144,7 +142,7 @@ function Room() {
                 deviceRef.current = device;
                 console.log("[Room] Device loaded");
 
-                // ── Step 3: Create the send transport ────────────────────────
+                // ── Step 3: Create the send transport 
                 // This is the WebRTC connection we'll use to upload our camera/mic.
                 setStatus("Setting up connection…");
                 const sendTransportParams = await emitAsync("create-send-transport");
@@ -178,10 +176,10 @@ function Room() {
                 sendTransport.on("connectionstatechange", (state) => {
                     console.log("[SendTransport] State:", state);
                     if (state === "connected") setStatus("🟢 Live");
-                    if (state === "failed")    setStatus("❌ Connection failed");
+                    if (state === "failed") setStatus("❌ Connection failed");
                 });
 
-                // ── Step 4: Create the recv transport ────────────────────────
+                // ── Step 4: Create the recv transport 
                 // This is the WebRTC connection we'll use to download other people's media.
                 const recvTransportParams = await emitAsync("create-recv-transport");
                 const recvTransport = device.createRecvTransport(recvTransportParams);
@@ -201,18 +199,18 @@ function Room() {
                     console.log("[RecvTransport] State:", state);
                 });
 
-                // ── Step 5: Capture camera and mic ────────────────────────────
+                // ── Step 5: Capture camera and mic 
                 setStatus("Requesting camera & mic…");
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width:     { ideal: 1280 },
-                        height:    { ideal: 720 },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
                         frameRate: { ideal: 30 },
                     },
                     audio: {
                         echoCancellation: true, // cuts out echo from speakers
                         noiseSuppression: true, // reduces background noise
-                        autoGainControl:  true, // keeps volume consistent
+                        autoGainControl: true, // keeps volume consistent
                     },
                 });
 
@@ -223,7 +221,7 @@ function Room() {
                     localVideoRef.current.srcObject = stream;
                 }
 
-                // ── Produce VIDEO ─────────────────────────────────────────────
+                // ── Produce VIDEO 
                 // Sending the video track to the server so others can receive it
                 const videoTrack = stream.getVideoTracks()[0];
                 if (videoTrack) {
@@ -234,7 +232,7 @@ function Room() {
                     console.log("[Room] Video producer created:", videoProducer.id);
                 }
 
-                // ── Produce AUDIO ─────────────────────────────────────────────
+                // ── Produce AUDIO 
                 // Sending the mic track to the server so others can hear us
                 const audioTrack = stream.getAudioTracks()[0];
                 if (audioTrack) {
@@ -247,7 +245,7 @@ function Room() {
 
                 setStatus("🟢 Live");
 
-                // ── Step 6: Subscribe to streams already in the room ──────────
+                // ── Step 6: Subscribe to streams already in the room 
                 // If there were people in the room before we joined, get their streams now.
                 const { producers } = await emitAsync("get-producers");
                 setPeerCount(new Set(producers.map((p) => p.peerId)).size);
@@ -256,7 +254,7 @@ function Room() {
                     await consumeProducer(producerId, peerId, kind);
                 }
 
-                // ── Step 7: Load chat history ─────────────────────────────────
+                // ── Step 7: Load chat history 
                 // Fetch messages that were sent before we joined
                 const { messages } = await emitAsync("get-chat-history");
                 if (messages?.length) setChatMessages(messages);
@@ -273,7 +271,7 @@ function Room() {
             }
         }
 
-        // ── Socket event listeners ────────────────────────────────────────────
+        // ── Socket event listeners 
         // These are set up before init() runs so we don't miss any events.
 
         // Another peer just started sending a stream — subscribe to it
@@ -360,7 +358,7 @@ function Room() {
         };
     }, [roomId, consumeProducer]);
 
-    // ── Mute / unmute mic ─────────────────────────────────────────────────────
+    // ── Mute / unmute mic
     // We don't destroy the track — we just disable it so it sends silence
     function toggleMute() {
         const stream = streamRef.current;
@@ -371,7 +369,7 @@ function Room() {
         setIsMuted((prev) => !prev);
     }
 
-    // ── Turn camera on / off ──────────────────────────────────────────────────
+    // ── Turn camera on / off 
     // Same idea — disable the track instead of stopping it
     function toggleCamera() {
         const stream = streamRef.current;
@@ -382,7 +380,7 @@ function Room() {
         setIsCamOff((prev) => !prev);
     }
 
-    // ── Leave the meeting ──────────────────────────────────────────────────────
+    // ── Leave the meeting 
     // Stop everything and go back to the home page
     function handleLeave() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -394,7 +392,7 @@ function Room() {
         navigate("/");
     }
 
-    // ── Screen sharing ────────────────────────────────────────────────────────
+    // ── Screen sharing 
     async function toggleScreenShare() {
         if (isScreenSharing) {
             // Stop the current screen share
@@ -411,13 +409,13 @@ function Room() {
                 audio: false,                // don't capture system audio
             });
 
-            const screenTrack  = screenStream.getVideoTracks()[0];
+            const screenTrack = screenStream.getVideoTracks()[0];
             const sendTransport = sendTransportRef.current;
             if (!sendTransport || !screenTrack) return;
 
             // Produce the screen track the same way as the camera, with a type label
             const screenProducer = await sendTransport.produce({
-                track:   screenTrack,
+                track: screenTrack,
                 appData: { type: "screen" }, // lets the receiver know it's a screen, not a camera
             });
 
@@ -439,7 +437,7 @@ function Room() {
         }
     }
 
-    // ── Raise hand ────────────────────────────────────────────────────────────
+    // ── Raise hand 
     const myHandRaised = raisedHands[socket.id] || false;
 
     function toggleRaiseHand() {
@@ -455,7 +453,7 @@ function Room() {
         }
     }
 
-    // ── Chat helpers ──────────────────────────────────────────────────────────
+    // ── Chat helpers 
     function handleSendMessage() {
         const text = chatInput.trim();
         if (!text) return;
@@ -483,16 +481,16 @@ function Room() {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
-    // ── Grid layout based on number of participants ───────────────────────────
+    // ── Grid layout based on number of participants 
     // CSS classes control how many columns the video grid shows
     const totalParticipants = 1 + Object.keys(remoteStreams).length; // yourself + others
     const gridClass =
         totalParticipants <= 1 ? "grid-1"    // just you
-      : totalParticipants <= 2 ? "grid-2"    // you + 1 other
-      : totalParticipants <= 4 ? "grid-4"    // up to 4
-      : "grid-many";                          // 5+
+            : totalParticipants <= 2 ? "grid-2"    // you + 1 other
+                : totalParticipants <= 4 ? "grid-4"    // up to 4
+                    : "grid-many";                          // 5+
 
-    // ── Render ────────────────────────────────────────────────────────────────
+    // ── Render 
     return (
         <div className="room-container">
             {/* ── Header: logo, room ID, participant count, connection status ── */}
@@ -513,11 +511,10 @@ function Room() {
                 <div className="peer-count">👥 {totalParticipants}</div>
                 {/* Status pill changes color: green = live, red = error, grey = pending */}
                 <div
-                    className={`status-pill ${
-                        status.startsWith("🟢") ? "live"
-                        : status.startsWith("❌") ? "error"
-                        : "pending"
-                    }`}
+                    className={`status-pill ${status.startsWith("🟢") ? "live"
+                            : status.startsWith("❌") ? "error"
+                                : "pending"
+                        }`}
                 >
                     {status}
                 </div>
@@ -712,7 +709,7 @@ function Room() {
     );
 }
 
-// ── RemoteVideo component ──────────────────────────────────────────────────────
+// ── RemoteVideo component
 // A simple component that renders one remote participant's video tile.
 // We keep it separate so each tile manages its own <video> ref.
 function RemoteVideo({ peerId, stream, handRaised }) {

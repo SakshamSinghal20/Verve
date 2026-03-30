@@ -1,18 +1,16 @@
-// ============================================================
 //  App.jsx — Landing page
 //
 //  What this file does:
 //   - Shows the Verve home screen (create/join a meeting)
 //   - Creates the shared Socket.IO connection (exported for Room.jsx)
 //   - Handles logged-in user display and logout
-// ============================================================
 
 import { io } from "socket.io-client";
 import "./App.css";
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
-// ── Create the Socket.IO connection when the app first loads ──────────────────
+// ── Create the Socket.IO connection when the app first loads
 // This runs ONCE and the socket is shared across the whole app via the export below.
 // If there's a JWT token in localStorage (from a previous login), we send it along
 // so the server can verify the user's identity on the socket connection.
@@ -22,7 +20,7 @@ export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5
 });
 
 function App() {
-    const [roomId, setRoomId]     = useState("");       // value of the "join by ID" input
+    const [roomId, setRoomId] = useState("");       // value of the "join by ID" input
     const [connected, setConnected] = useState(false);  // tracks socket connection status
     const navigate = useNavigate();
 
@@ -33,7 +31,7 @@ function App() {
         return stored ? JSON.parse(stored) : null; // null = not logged in
     });
 
-    // ── Generate a random 8-character room ID ─────────────────────────────────
+    // ── Generate a random 8-character room ID 
     // Uses only lowercase letters and numbers so it's easy to share verbally
     function generateRoomId() {
         const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -44,14 +42,14 @@ function App() {
         return id;
     }
 
-    // ── Create a new meeting ──────────────────────────────────────────────────
+    // ── Create a new meeting 
     // Generates a fresh room ID and navigates straight into the room
     const handleCreate = () => {
         const newRoomId = generateRoomId();
         navigate(`/room/${newRoomId}`);
     };
 
-    // ── Join an existing meeting ──────────────────────────────────────────────
+    // ── Join an existing meeting 
     // Takes the ID the user typed and opens that room
     const handleJoin = () => {
         const trimmed = roomId.trim();
@@ -64,7 +62,7 @@ function App() {
         if (e.key === "Enter") handleJoin();
     };
 
-    // ── Logout ────────────────────────────────────────────────────────────────
+    // ── Logout 
     // Remove saved credentials and reload the page so the socket reconnects as a guest
     const handleLogout = () => {
         localStorage.removeItem("verve-token");
@@ -73,7 +71,7 @@ function App() {
         window.location.reload(); // reload so the socket is re-created without the token
     };
 
-    // ── Track socket connection status ────────────────────────────────────────
+    // ── Track socket connection status
     // Used to show the green/grey dot indicator at the bottom of the card
     useEffect(() => {
         socket.on("connect", () => {
