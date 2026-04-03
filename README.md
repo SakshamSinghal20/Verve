@@ -438,10 +438,10 @@ This project is open source and available under the [MIT License](LICENSE).
 *If Verve made your calls better, give it a ⭐ — it fuels our late-night coding sessions!*
 
 ```
-     ___
+  ___
     /   \      "Let's hop on Verve"
    | 👀 |       — said every cool dev ever
-    \___/
+ \___/
 ```
 
 </div>
