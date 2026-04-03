@@ -39,41 +39,44 @@ function Login() {
     return (
         <div className="auth-container">
             <form className="auth-card" onSubmit={handleSubmit}>
-                <h1 className="auth-logo">Verve</h1>
-                <p className="auth-subtitle">Sign in to your account</p>
+                <span className="auth-logo">Verve</span>
+                <h1 className="auth-title">Welcome back</h1>
+                <p className="auth-subtitle">Sign in to your account to continue</p>
 
-                {error && <div className="auth-error">{error}</div>}
+                <div className="auth-form">
+                    {error && <div className="auth-error">{error}</div>}
 
-                <div className="auth-field">
-                    <label htmlFor="login-email">Email</label>
-                    <input
-                        id="login-email"
-                        type="email"
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                    />
+                    <div className="auth-field">
+                        <label htmlFor="login-email">Email</label>
+                        <input
+                            id="login-email"
+                            type="email"
+                            placeholder="you@example.com"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
+                    </div>
+
+                    <div className="auth-field">
+                        <label htmlFor="login-password">Password</label>
+                        <input
+                            id="login-password"
+                            type="password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                        />
+                    </div>
+
+                    <button type="submit" className="btn-auth" disabled={loading} id="btn-login">
+                        {loading ? "Signing in…" : "Sign In"}
+                    </button>
                 </div>
 
-                <div className="auth-field">
-                    <label htmlFor="login-password">Password</label>
-                    <input
-                        id="login-password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                    />
-                </div>
-
-                <button type="submit" className="auth-btn" disabled={loading} id="btn-login">
-                    {loading ? "Signing in…" : "Sign In"}
-                </button>
-
-                <p className="auth-link">
-                    Don't have an account? <Link to="/register">Create one</Link>
+                <p className="auth-footer">
+                    Don&apos;t have an account? <Link to="/register">Create one</Link>
                 </p>
             </form>
         </div>

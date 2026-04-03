@@ -1,134 +1,147 @@
-//  App.jsx — Landing page
-//
-//  What this file does:
-//   - Shows the Verve home screen (create/join a meeting)
-//   - Creates the shared Socket.IO connection (exported for Room.jsx)
-//   - Handles logged-in user display and logout
+//  App.jsx — Landing page + socket setup
+//  All socket + room navigation logic preserved exactly.
+//  Only visual markup is updated.
 
 import { io } from "socket.io-client";
 import "./App.css";
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
-// ── Create the Socket.IO connection when the app first loads
-// This runs ONCE and the socket is shared across the whole app via the export below.
-// If there's a JWT token in localStorage (from a previous login), we send it along
-// so the server can verify the user's identity on the socket connection.
+// Shared socket — created once, exported for Room.jsx
 const token = localStorage.getItem("verve-token");
 export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
-    auth: token ? { token } : {}, // attach token if logged in, empty object if guest
+    auth: token ? { token } : {},
 });
 
+// SVG icons (inline — no icon library dep)
+const IconVideo = () => (
+    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+    </svg>
+);
+
+const IconArrow = () => (
+    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+    </svg>
+);
+
 function App() {
-    const [roomId, setRoomId] = useState("");       // value of the "join by ID" input
-    const [connected, setConnected] = useState(false);  // tracks socket connection status
+    const [roomId, setRoomId]       = useState("");
+    const [connected, setConnected] = useState(false);
+    const [toast, setToast]         = useState(null); // { msg, hide }
     const navigate = useNavigate();
 
-    // Load the logged-in user from localStorage.
-    // We use a lazy initializer so it only runs once on mount, not on every re-render.
     const [user, setUser] = useState(() => {
         const stored = localStorage.getItem("verve-user");
-        return stored ? JSON.parse(stored) : null; // null = not logged in
+        return stored ? JSON.parse(stored) : null;
     });
 
-    // ── Generate a random 8-character room ID 
-    // Uses only lowercase letters and numbers so it's easy to share verbally
+    // ── Generate random 8-char room ID ──────────────────────────
     function generateRoomId() {
         const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
         let id = "";
-        for (let i = 0; i < 8; i++) {
-            id += chars[Math.floor(Math.random() * chars.length)];
-        }
+        for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
         return id;
     }
 
-    // ── Create a new meeting 
-    // Generates a fresh room ID and navigates straight into the room
-    const handleCreate = () => {
-        const newRoomId = generateRoomId();
-        navigate(`/room/${newRoomId}`);
-    };
+    const handleCreate = () => navigate(`/room/${generateRoomId()}`);
 
-    // ── Join an existing meeting 
-    // Takes the ID the user typed and opens that room
     const handleJoin = () => {
         const trimmed = roomId.trim();
-        if (!trimmed) return; // do nothing if the input is empty
+        if (!trimmed) return;
         navigate(`/room/${trimmed}`);
     };
 
-    // Allow pressing Enter in the input field instead of clicking the Join button
-    const handleKeyDown = (e) => {
-        if (e.key === "Enter") handleJoin();
-    };
+    const handleKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
 
-    // ── Logout 
-    // Remove saved credentials and reload the page so the socket reconnects as a guest
     const handleLogout = () => {
         localStorage.removeItem("verve-token");
         localStorage.removeItem("verve-user");
         setUser(null);
-        window.location.reload(); // reload so the socket is re-created without the token
+        window.location.reload();
     };
 
-    // ── Track socket connection status
-    // Used to show the green/grey dot indicator at the bottom of the card
+    // ── Toast helper ────────────────────────────────────────────
+    function showToast(msg) {
+        setToast({ msg, hide: false });
+        setTimeout(() => setToast((t) => t ? { ...t, hide: true } : null), 2200);
+        setTimeout(() => setToast(null), 2500);
+    }
+
+    // ── Socket connection tracking ──────────────────────────────
     useEffect(() => {
-        socket.on("connect", () => {
-            console.log("Connected to server:", socket.id);
-            setConnected(true);
-        });
-
-        socket.on("disconnect", () => {
-            console.log("Disconnected from server");
-            setConnected(false);
-        });
-
-        // Remove listeners when this component unmounts to avoid memory leaks
-        return () => {
-            socket.off("connect");
-            socket.off("disconnect");
-        };
+        socket.on("connect",    () => setConnected(true));
+        socket.on("disconnect", () => setConnected(false));
+        return () => { socket.off("connect"); socket.off("disconnect"); };
     }, []);
 
     return (
         <div className="landing-container">
-            <div className="landing-card">
-                <h1 className="landing-title">Verve</h1>
-                <p className="landing-subtitle">
-                    Crystal-clear video calls, instantly.
-                </p>
+            {/* Animated background orbs */}
+            <div className="landing-bg">
+                <div className="landing-orb landing-orb-1" />
+                <div className="landing-orb landing-orb-2" />
+                <div className="landing-orb landing-orb-3" />
+            </div>
 
-                {/* Show the user's name and logout button if they're signed in */}
-                {user && (
-                    <div className="user-badge">
-                        <span className="user-name">👋 {user.name}</span>
-                        <button className="btn-logout" onClick={handleLogout}>
-                            Logout
-                        </button>
+            {/* Nav */}
+            <nav className="landing-nav">
+                <span className="nav-logo">Verve</span>
+                {!user ? (
+                    <div className="nav-auth">
+                        <Link to="/login"    className="nav-link">Sign In</Link>
+                        <Link to="/register" className="nav-link nav-link-primary">Register</Link>
+                    </div>
+                ) : (
+                    <div className="nav-auth">
+                        <span className="nav-link" style={{ color: "var(--text)", cursor: "default" }}>
+                            👋 {user.name}
+                        </span>
+                        <button className="btn-logout" onClick={handleLogout}>Logout</button>
                     </div>
                 )}
+            </nav>
 
-                <div className="landing-actions">
-                    {/* "Create Meeting" — generates a new room ID and enters it immediately */}
-                    <button
-                        className="btn-create"
-                        onClick={handleCreate}
-                        id="btn-create-meeting"
-                    >
-                        <span className="btn-icon">✦</span>
-                        Create Meeting
+            {/* Hero content */}
+            <div className="landing-content">
+                <div className="hero-badge">
+                    <span className="hero-badge-dot" />
+                    No downloads required
+                </div>
+
+                <h1 className="hero-brand">Verve</h1>
+
+                <p className="hero-headline">
+                    Simple, fast video meetings
+                </p>
+
+                <p className="hero-subtext">
+                    No downloads. Just share a link and start talking — crystal-clear calls that work everywhere.
+                </p>
+
+                {/* Action card */}
+                <div className="hero-card">
+                    {user && (
+                        <div className="user-badge" style={{ marginBottom: "1rem" }}>
+                            <span className="user-name">Signed in as {user.name}</span>
+                            <button className="btn-logout" onClick={handleLogout}>Logout</button>
+                        </div>
+                    )}
+
+                    <button className="btn-create" onClick={handleCreate} id="btn-create-meeting">
+                        <IconVideo />
+                        Create New Room
                     </button>
 
                     <div className="divider">
-                        <span>or</span>
+                        <span>or join existing</span>
                     </div>
 
-                    {/* "Join by ID" — user pastes or types a room ID someone shared with them */}
                     <div className="join-group">
                         <input
                             type="text"
-                            placeholder="Enter Room ID to join…"
+                            placeholder="Enter Room ID…"
                             value={roomId}
                             onChange={(e) => setRoomId(e.target.value)}
                             onKeyDown={handleKeyDown}
@@ -137,31 +150,51 @@ function App() {
                         <button
                             className="btn-join"
                             onClick={handleJoin}
-                            disabled={!roomId.trim()} // keep disabled until something is typed
+                            disabled={!roomId.trim()}
                             id="btn-join-meeting"
                         >
-                            Join →
+                            <span>Join</span>
+                            <IconArrow />
                         </button>
                     </div>
                 </div>
+            </div>
 
-                <div className="landing-footer">
-                    {/* Connection indicator — shows whether the socket is connected to the server */}
-                    <div className={`connection-indicator ${connected ? "online" : "offline"}`}>
-                        <span className="dot" />
-                        {connected ? "Connected to server" : "Connecting…"}
-                    </div>
-
-                    {/* Only show auth links when the user is not logged in */}
-                    {!user && (
-                        <div className="auth-links">
-                            <Link to="/login">Sign In</Link>
-                            <span className="auth-sep">•</span>
-                            <Link to="/register">Register</Link>
-                        </div>
-                    )}
+            {/* Feature highlights */}
+            <div className="features-row">
+                <div className="feature-card">
+                    <span className="feature-icon">🔒</span>
+                    <span className="feature-label">End-to-end encrypted</span>
+                </div>
+                <div className="feature-card">
+                    <span className="feature-icon">⚡</span>
+                    <span className="feature-label">Ultra-low latency</span>
+                </div>
+                <div className="feature-card">
+                    <span className="feature-icon">💬</span>
+                    <span className="feature-label">Built-in chat</span>
+                </div>
+                <div className="feature-card">
+                    <span className="feature-icon">🖥️</span>
+                    <span className="feature-label">Screen sharing</span>
                 </div>
             </div>
+
+            {/* Footer - connection indicator */}
+            <div className="landing-footer">
+                <div className={`connection-indicator ${connected ? "online" : "offline"}`}>
+                    <span className="dot" />
+                    {connected ? "Connected to server" : "Connecting…"}
+                </div>
+            </div>
+
+            {/* Toast */}
+            {toast && (
+                <div className={`toast ${toast.hide ? "hide" : ""}`}>
+                    <span className="toast-icon">✓</span>
+                    {toast.msg}
+                </div>
+            )}
         </div>
     );
 }
