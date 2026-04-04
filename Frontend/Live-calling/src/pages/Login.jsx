@@ -1,15 +1,14 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
 import "./Auth.css";
-
-const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
-
 function Login() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const { login } = useContext(AuthContext);
 
     async function handleSubmit(e) {
         e.preventDefault();
@@ -17,17 +16,7 @@ function Login() {
         setLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Login failed");
-
-            localStorage.setItem("verve-token", data.token);
-            localStorage.setItem("verve-user", JSON.stringify(data.user));
+            await login(email, password);
             navigate("/");
         } catch (err) {
             setError(err.message);

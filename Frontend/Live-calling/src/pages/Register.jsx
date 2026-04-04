@@ -1,9 +1,7 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
 import "./Auth.css";
-
-const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
-
 function Register() {
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
@@ -11,6 +9,7 @@ function Register() {
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+    const { register } = useContext(AuthContext);
 
     async function handleSubmit(e) {
         e.preventDefault();
@@ -18,17 +17,7 @@ function Register() {
         setLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/api/auth/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, email, password }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Registration failed");
-
-            localStorage.setItem("verve-token", data.token);
-            localStorage.setItem("verve-user", JSON.stringify(data.user));
+            await register(name, email, password);
             navigate("/");
         } catch (err) {
             setError(err.message);

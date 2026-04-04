@@ -4,7 +4,8 @@
 
 import { io } from "socket.io-client";
 import "./App.css";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext } from "react";
+import { AuthContext } from "./context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 
 // Shared socket — created once, exported for Room.jsx
@@ -45,10 +46,7 @@ function App() {
     const [toast, setToast]         = useState(null); // { msg, hide }
     const navigate = useNavigate();
 
-    const [user, setUser] = useState(() => {
-        const stored = localStorage.getItem("verve-user");
-        return stored ? JSON.parse(stored) : null;
-    });
+    const { user, loading, logout } = useContext(AuthContext);
 
     // ── Generate random 8-char room ID ──────────────────────────
     function generateRoomId() {
@@ -58,7 +56,13 @@ function App() {
         return id;
     }
 
-    const handleCreate = () => navigate(`/room/${generateRoomId()}`);
+    const handleCreate = () => {
+        if (!user) {
+            navigate("/login");
+            return;
+        }
+        navigate(`/room/${generateRoomId()}`);
+    };
 
     const handleJoin = () => {
         const trimmed = roomId.trim();
@@ -68,12 +72,7 @@ function App() {
 
     const handleKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
 
-    const handleLogout = () => {
-        localStorage.removeItem("verve-token");
-        localStorage.removeItem("verve-user");
-        setUser(null);
-        window.location.reload();
-    };
+
 
     // ── Toast helper ────────────────────────────────────────────
     function showToast(msg) {
@@ -88,6 +87,14 @@ function App() {
         socket.on("disconnect", () => setConnected(false));
         return () => { socket.off("connect"); socket.off("disconnect"); };
     }, []);
+
+    if (loading) {
+        return (
+            <div className="landing-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+                <div style={{ color: 'var(--text)', fontSize: '1.2rem' }}>Loading Verve...</div>
+            </div>
+        );
+    }
 
     return (
         <div className="landing-container">
@@ -105,7 +112,7 @@ function App() {
                         <span className="nav-link" style={{ color: "var(--text)", cursor: "default" }}>
                             👋 {user.name}
                         </span>
-                        <button className="btn-logout" onClick={handleLogout}>Logout</button>
+                        <button className="btn-logout" onClick={logout}>Logout</button>
                     </div>
                 )}
             </nav>
@@ -132,7 +139,7 @@ function App() {
                     {user && (
                         <div className="user-badge" style={{ marginBottom: "1rem" }}>
                             <span className="user-name">Signed in as {user.name}</span>
-                            <button className="btn-logout" onClick={handleLogout}>Logout</button>
+                            <button className="btn-logout" onClick={logout}>Logout</button>
                         </div>
                     )}
 

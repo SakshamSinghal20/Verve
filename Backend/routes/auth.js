@@ -2,7 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-const { JWT_SECRET } = require("../middleware/auth");
+const { JWT_SECRET, authMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -73,6 +73,22 @@ router.post("/login", async (req, res) => {
         });
     } catch (err) {
         console.error("Login error:", err);
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+// ── Get Current User (Token Validation) ──────────────────────────────────
+router.get("/me", authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select("-passwordHash");
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.json({
+            user: { id: user._id, name: user.name, email: user.email },
+        });
+    } catch (err) {
+        console.error("Auth /me error:", err);
         res.status(500).json({ error: "Server error" });
     }
 });
