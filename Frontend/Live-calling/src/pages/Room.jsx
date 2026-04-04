@@ -158,6 +158,7 @@ function Room() {
 
     // Screen share
     const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [localScreenStream, setLocalScreenStream] = useState(null);
     const screenProducerRef = useRef(null);
 
     // Raise hand
@@ -189,7 +190,7 @@ function Room() {
     }
 
     // ── Consume a remote producer ────────────────────────────
-    const consumeProducer = useCallback(async (producerId, peerId, kind) => {
+    const consumeProducer = useCallback(async (producerId, peerId, kind, appData) => {
         try {
             const device = deviceRef.current;
             if (!device) return;
@@ -209,11 +210,20 @@ function Room() {
                 rtpParameters: consumerData.rtpParameters,
             });
 
+            // Listen to track ending to re-render UI if someone stops video/screen
+            consumer.track.onended = () => {
+                 setRemoteStreams((prev) => ({ ...prev }));
+            };
+
             consumersRef.current.push(consumer);
 
             setRemoteStreams((prev) => {
-                const existing = prev[peerId] || new MediaStream();
-                existing.addTrack(consumer.track);
+                const existing = prev[peerId] || { webcam: new MediaStream(), screen: new MediaStream() };
+                if (appData && appData.type === "screen") {
+                    existing.screen.addTrack(consumer.track);
+                } else {
+                    existing.webcam.addTrack(consumer.track);
+                }
                 return { ...prev, [peerId]: existing };
             });
 
@@ -292,8 +302,8 @@ function Room() {
 
                 const { producers } = await emitAsync("get-producers");
                 setPeerCount(new Set(producers.map((p) => p.peerId)).size);
-                for (const { producerId, peerId, kind } of producers) {
-                    await consumeProducer(producerId, peerId, kind);
+                for (const { producerId, peerId, kind, appData } of producers) {
+                    await consumeProducer(producerId, peerId, kind, appData);
                 }
 
                 const { messages } = await emitAsync("get-chat-history");
@@ -310,9 +320,9 @@ function Room() {
         }
 
         // ── Socket listeners ─────────────────────────────────
-        socket.on("new-producer", async ({ producerId, peerId, kind }) => {
-            setPeerCount((prev) => prev + (kind === "video" ? 1 : 0));
-            await consumeProducer(producerId, peerId, kind);
+        socket.on("new-producer", async ({ producerId, peerId, kind, appData }) => {
+            setPeerCount((prev) => prev + (kind === "video" && (!appData || appData.type !== "screen") ? 1 : 0));
+            await consumeProducer(producerId, peerId, kind, appData);
         });
 
         socket.on("new-peer", ({ peerId }) => {
@@ -399,6 +409,7 @@ function Room() {
             screenProducerRef.current?.close();
             screenProducerRef.current = null;
             setIsScreenSharing(false);
+            setLocalScreenStream(null);
             return;
         }
         try {
@@ -409,11 +420,13 @@ function Room() {
 
             const screenProducer = await sendTransport.produce({ track: screenTrack, appData: { type: "screen" } });
             screenProducerRef.current = screenProducer;
+            setLocalScreenStream(screenStream);
             setIsScreenSharing(true);
 
             screenTrack.onended = () => {
                 screenProducer.close();
                 screenProducerRef.current = null;
+                setLocalScreenStream(null);
                 setIsScreenSharing(false);
             };
         } catch (err) {
@@ -455,7 +468,7 @@ function Room() {
     }, [chatMessages]);
 
     // Grid class
-    const totalParticipants = 1 + Object.keys(remoteStreams).length;
+    const totalParticipants = 1 + Object.keys(remoteStreams).length + (localScreenStream ? 1 : 0) + Object.values(remoteStreams).filter(s => s.screen?.getVideoTracks().some(t => t.readyState === "live")).length;
     const gridClass =
         totalParticipants <= 1 ? "grid-1"
         : totalParticipants <= 2 ? "grid-2"
@@ -511,14 +524,33 @@ function Room() {
                     {raisedHands[socket.id] && <div className="hand-badge">✋</div>}
                 </div>
 
+                {/* Local Screen Share Tile */}
+                {localScreenStream && (
+                    <div className="video-card local screen-share">
+                        <video
+                            ref={(el) => { if (el) el.srcObject = localScreenStream; }}
+                            autoPlay playsInline muted
+                        />
+                        <div className="video-label">Your Screen</div>
+                    </div>
+                )}
+
                 {/* Remote tiles */}
-                {Object.entries(remoteStreams).map(([peerId, stream]) => (
-                    <RemoteVideo
-                        key={peerId}
-                        peerId={peerId}
-                        stream={stream}
-                        handRaised={!!raisedHands[peerId]}
-                    />
+                {Object.entries(remoteStreams).map(([peerId, streams]) => (
+                    <React.Fragment key={peerId}>
+                        <RemoteVideo
+                            peerId={peerId}
+                            stream={streams.webcam}
+                            handRaised={!!raisedHands[peerId]}
+                        />
+                        {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
+                            <RemoteVideo
+                                peerId={`${peerId}-screen`}
+                                stream={streams.screen}
+                                handRaised={false}
+                            />
+                        )}
+                    </React.Fragment>
                 ))}
             </main>
 

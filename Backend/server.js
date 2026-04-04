@@ -299,7 +299,7 @@ io.on("connection", (socket) => {
     //   Client wants to send a media track (camera video or mic audio).   
     //   Server creates a Producer and notifies all other peers so they     
     //   can subscribe (consume) to it.                                     
-    socket.on("produce", async ({ transportId, kind, rtpParameters }, callback) => {
+    socket.on("produce", async ({ transportId, kind, rtpParameters, appData }, callback) => {
         try {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
 
@@ -309,7 +309,7 @@ io.on("connection", (socket) => {
             }
 
             // Create the producer — this is the server-side representation of the client's track
-            const producer = await peer.sendTransport.produce({ kind, rtpParameters });
+            const producer = await peer.sendTransport.produce({ kind, rtpParameters, appData });
             peer.producers.set(producer.id, producer); // save for later lookup
 
             console.log(`🎬 Producer created for ${socket.id}: ${producer.id} (${kind})`);
@@ -328,6 +328,7 @@ io.on("connection", (socket) => {
                 producerId: producer.id,
                 peerId: socket.id,
                 kind,
+                appData,
             });
         } catch (err) {
             console.error("produce error:", err);
@@ -427,6 +428,7 @@ io.on("connection", (socket) => {
                         producerId,
                         peerId,
                         kind: producer.kind, // "audio" or "video"
+                        appData: producer.appData,
                     });
                 }
             }
