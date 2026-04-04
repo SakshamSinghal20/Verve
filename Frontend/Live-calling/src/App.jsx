@@ -1,6 +1,5 @@
 //  App.jsx — Landing page + socket setup
-//  All socket + room navigation logic preserved exactly.
-//  Only visual markup is updated.
+//  Three distinct room flows: Instant Meeting, Custom Room, Join Existing
 
 import { io } from "socket.io-client";
 import "./App.css";
@@ -8,13 +7,15 @@ import { useEffect, useState, useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 
+const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+
 // Shared socket — created once, exported for Room.jsx
 const token = localStorage.getItem("verve-token");
-export const socket = io(import.meta.env.VITE_BACKEND_URL || "http://localhost:5000", {
+export const socket = io(API_URL, {
     auth: token ? { token } : {},
 });
 
-// SVG icons (inline — no icon library dep)
+// ── SVG icons ───────────────────────────────────────────────
 const IconVideo = () => (
     <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
@@ -24,6 +25,12 @@ const IconVideo = () => (
 const IconArrow = () => (
     <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+    </svg>
+);
+
+const IconPlus = () => (
+    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
     </svg>
 );
 
@@ -40,48 +47,106 @@ const IconMonitor = () => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
 );
 
+const IconChevron = ({ open }) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+         style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.25s ease" }}>
+        <polyline points="6 9 12 15 18 9" />
+    </svg>
+);
+
 function App() {
-    const [roomId, setRoomId]       = useState("");
-    const [connected, setConnected] = useState(false);
-    const [toast, setToast]         = useState(null); // { msg, hide }
+    const [roomId, setRoomId]               = useState("");
+    const [customRoomId, setCustomRoomId]   = useState("");
+    const [connected, setConnected]         = useState(false);
+    const [toast, setToast]                 = useState(null);
+    const [customOpen, setCustomOpen]       = useState(false);
+    const [loadingInstant, setLoadingInstant] = useState(false);
+    const [loadingCustom, setLoadingCustom]   = useState(false);
+    const [loadingJoin, setLoadingJoin]       = useState(false);
     const navigate = useNavigate();
 
     const { user, loading, logout } = useContext(AuthContext);
 
-    // ── Generate random 8-char room ID ──────────────────────────
-    function generateRoomId() {
-        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        let id = "";
-        for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
-        return id;
+    // ── Helper: get auth header ─────────────────────────────
+    function authHeaders() {
+        const t = localStorage.getItem("verve-token");
+        return t ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }
+                 : { "Content-Type": "application/json" };
     }
 
-    const handleCreate = () => {
-        if (!user) {
-            navigate("/login");
-            return;
+    // ── Toast helper ────────────────────────────────────────
+    function showToast(msg, type = "success") {
+        setToast({ msg, type, hide: false });
+        setTimeout(() => setToast((t) => t ? { ...t, hide: true } : null), 2800);
+        setTimeout(() => setToast(null), 3100);
+    }
+
+    // ── 1) Instant Meeting ──────────────────────────────────
+    async function handleInstant() {
+        if (!user) { navigate("/login"); return; }
+        setLoadingInstant(true);
+        try {
+            const res = await fetch(`${API_URL}/api/rooms/instant`, {
+                method: "POST",
+                headers: authHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to create room");
+            navigate(`/room/${data.roomId}`);
+        } catch (err) {
+            showToast(err.message, "error");
+        } finally {
+            setLoadingInstant(false);
         }
-        navigate(`/room/${generateRoomId()}`);
-    };
-
-    const handleJoin = () => {
-        const trimmed = roomId.trim();
-        if (!trimmed) return;
-        navigate(`/room/${trimmed}`);
-    };
-
-    const handleKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
-
-
-
-    // ── Toast helper ────────────────────────────────────────────
-    function showToast(msg) {
-        setToast({ msg, hide: false });
-        setTimeout(() => setToast((t) => t ? { ...t, hide: true } : null), 2200);
-        setTimeout(() => setToast(null), 2500);
     }
 
-    // ── Socket connection tracking ──────────────────────────────
+    // ── 2) Create Custom Room ───────────────────────────────
+    async function handleCustomCreate() {
+        if (!user) { navigate("/login"); return; }
+        const trimmed = customRoomId.trim().toLowerCase();
+        if (!trimmed) return;
+        setLoadingCustom(true);
+        try {
+            const res = await fetch(`${API_URL}/api/rooms`, {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify({ roomId: trimmed }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to create room");
+            navigate(`/room/${data.roomId}`);
+        } catch (err) {
+            showToast(err.message, "error");
+        } finally {
+            setLoadingCustom(false);
+        }
+    }
+
+    // ── 3) Join Existing Room ───────────────────────────────
+    async function handleJoin() {
+        const trimmed = roomId.trim().toLowerCase();
+        if (!trimmed) return;
+        setLoadingJoin(true);
+        try {
+            const res = await fetch(`${API_URL}/api/rooms/join`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ roomId: trimmed }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Room not found");
+            navigate(`/room/${data.roomId}`);
+        } catch (err) {
+            showToast(err.message, "error");
+        } finally {
+            setLoadingJoin(false);
+        }
+    }
+
+    const handleJoinKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
+    const handleCustomKeyDown = (e) => { if (e.key === "Enter") handleCustomCreate(); };
+
+    // ── Socket connection tracking ──────────────────────────
     useEffect(() => {
         socket.on("connect",    () => setConnected(true));
         socket.on("disconnect", () => setConnected(false));
@@ -143,11 +208,51 @@ function App() {
                         </div>
                     )}
 
-                    <button className="btn-create" onClick={handleCreate} id="btn-create-meeting">
+                    {/* ── Section 1: Instant Meeting ── */}
+                    <button
+                        className="btn-create"
+                        onClick={handleInstant}
+                        disabled={loadingInstant}
+                        id="btn-create-meeting"
+                    >
                         <IconVideo />
-                        Create New Room
+                        {loadingInstant ? "Creating…" : "Start Instant Meeting"}
                     </button>
 
+                    {/* ── Section 2: Custom Room (collapsible) ── */}
+                    <button
+                        className="btn-custom-toggle"
+                        onClick={() => setCustomOpen(!customOpen)}
+                        type="button"
+                    >
+                        <IconPlus />
+                        <span>Create with Custom ID</span>
+                        <IconChevron open={customOpen} />
+                    </button>
+
+                    <div className={`custom-section ${customOpen ? "open" : ""}`}>
+                        <div className="custom-group">
+                            <input
+                                type="text"
+                                placeholder="Enter custom room ID…"
+                                value={customRoomId}
+                                onChange={(e) => setCustomRoomId(e.target.value)}
+                                onKeyDown={handleCustomKeyDown}
+                                id="input-custom-room-id"
+                            />
+                            <button
+                                className="btn-custom-create"
+                                onClick={handleCustomCreate}
+                                disabled={!customRoomId.trim() || loadingCustom}
+                                id="btn-custom-create"
+                            >
+                                {loadingCustom ? "Creating…" : "Create"}
+                            </button>
+                        </div>
+                        <p className="custom-hint">3–32 characters, letters, numbers, and hyphens only</p>
+                    </div>
+
+                    {/* ── Section 3: Join Existing Room ── */}
                     <div className="divider">
                         <span>or join existing</span>
                     </div>
@@ -158,16 +263,16 @@ function App() {
                             placeholder="Enter Room ID…"
                             value={roomId}
                             onChange={(e) => setRoomId(e.target.value)}
-                            onKeyDown={handleKeyDown}
+                            onKeyDown={handleJoinKeyDown}
                             id="input-room-id"
                         />
                         <button
                             className="btn-join"
                             onClick={handleJoin}
-                            disabled={!roomId.trim()}
+                            disabled={!roomId.trim() || loadingJoin}
                             id="btn-join-meeting"
                         >
-                            <span>Join</span>
+                            <span>{loadingJoin ? "Joining…" : "Join"}</span>
                             <IconArrow />
                         </button>
                     </div>
@@ -204,8 +309,8 @@ function App() {
 
             {/* Toast */}
             {toast && (
-                <div className={`toast ${toast.hide ? "hide" : ""}`}>
-                    <span className="toast-icon">✓</span>
+                <div className={`toast ${toast.type === "error" ? "toast-error" : ""} ${toast.hide ? "hide" : ""}`}>
+                    <span className="toast-icon">{toast.type === "error" ? "✕" : "✓"}</span>
                     {toast.msg}
                 </div>
             )}

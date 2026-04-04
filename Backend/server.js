@@ -11,6 +11,8 @@ const cors = require("cors");        // Cross-Origin Resource Sharing
 const mongoose = require("mongoose");    // MongoDB connection + models
 const { v4: uuidv4 } = require("uuid");  // Unique ID generator (available for future use)
 const authRoutes = require("./routes/auth");                       // REST routes: /api/auth/register, /api/auth/login
+const roomRoutes = require("./routes/rooms");                      // REST routes: /api/rooms/*
+const Room = require("./models/Room");                             // MongoDB Room model
 const { socketAuthMiddleware } = require("./middleware/auth");     // JWT check for socket connections
 
 // ── Create the Express app and wrap it in a raw HTTP server
@@ -35,6 +37,10 @@ app.get("/", (req, res) => {
 // Mount auth REST routes under /api/auth
 // e.g. POST /api/auth/register, POST /api/auth/login
 app.use("/api/auth", authRoutes);
+
+// Mount room REST routes under /api/rooms
+// e.g. POST /api/rooms/instant, POST /api/rooms, POST /api/rooms/join
+app.use("/api/rooms", roomRoutes);
 
 // ── Socket.IO setup
 // Attach Socket.IO to the same HTTP server as Express so they share one port
@@ -86,8 +92,9 @@ const mediaCodecs = [
     },
 ];
 
-// ── In-memory room storage
-// We don't store rooms in the database — they're destroyed when everyone leaves.
+// ── In-memory room storage (Mediasoup state)
+// Mediasoup routers/transports/producers/consumers live here.
+// Room *metadata* (who created it, active status) lives in MongoDB.
 //
 // Structure:
 // rooms (Map)
@@ -164,7 +171,7 @@ io.on("connection", (socket) => {
             socket.join(roomId);
             socket.roomId = roomId;
 
-            // If this is the very first person joining, create the room and its router
+            // If this is the very first person joining, create the Mediasoup router
             if (!rooms.has(roomId)) {
                 const router = await worker.createRouter({ mediaCodecs });
                 rooms.set(roomId, {
@@ -172,11 +179,23 @@ io.on("connection", (socket) => {
                     peers: new Map(),
                     chatHistory: [], // starts empty
                 });
-                console.log(`📦 Room ${roomId} created`);
+                console.log(`📦 Room ${roomId} Mediasoup router created`);
             }
 
             const room = rooms.get(roomId);
             getOrCreatePeer(roomId, socket.id); // register this peer in the room
+
+            // ── Sync with MongoDB: add this socket to participants ──
+            try {
+                await Room.findOneAndUpdate(
+                    { roomId },
+                    { $addToSet: { participants: socket.id }, isActive: true },
+                    { upsert: false }
+                );
+            } catch (dbErr) {
+                console.error("MongoDB sync (join) error:", dbErr.message);
+                // Non-fatal — Mediasoup still works even if DB sync fails
+            }
 
             console.log(`✅ Socket ${socket.id} joined room ${roomId} (${room.peers.size} peers)`);
 
@@ -476,11 +495,12 @@ io.on("connection", (socket) => {
     //   Fires automatically when a client closes the tab, loses internet, 
     //   or clicks "Leave". Cleans up all their resources and notifies      
     //   remaining peers.                                                    
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 
         if (socket.roomId && rooms.has(socket.roomId)) {
-            const room = rooms.get(socket.roomId);
+            const currentRoomId = socket.roomId;
+            const room = rooms.get(currentRoomId);
             const peer = room.peers.get(socket.id);
 
             if (peer) {
@@ -495,17 +515,38 @@ io.on("connection", (socket) => {
             }
 
             // Tell the remaining peers that this person left
-            socket.to(socket.roomId).emit("peer-left", { peerId: socket.id });
+            socket.to(currentRoomId).emit("peer-left", { peerId: socket.id });
 
             // Broadcast the updated list so UI peer counts stay accurate
             const peerIds = Array.from(room.peers.keys());
-            io.to(socket.roomId).emit("peers-list", { peers: peerIds });
+            io.to(currentRoomId).emit("peers-list", { peers: peerIds });
 
             // If the room is now empty, destroy it to free all resources
             if (room.peers.size === 0) {
                 room.router.close(); // close the Mediasoup router
-                rooms.delete(socket.roomId);
-                console.log(`🗑️ Room ${socket.roomId} deleted (empty)`);
+                rooms.delete(currentRoomId);
+                console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
+
+                // ── Sync with MongoDB: mark room inactive ──
+                try {
+                    await Room.findOneAndUpdate(
+                        { roomId: currentRoomId },
+                        { isActive: false, participants: [] }
+                    );
+                    console.log(`📝 Room ${currentRoomId} marked inactive in MongoDB`);
+                } catch (dbErr) {
+                    console.error("MongoDB sync (delete) error:", dbErr.message);
+                }
+            } else {
+                // ── Sync with MongoDB: remove this socket from participants ──
+                try {
+                    await Room.findOneAndUpdate(
+                        { roomId: currentRoomId },
+                        { $pull: { participants: socket.id } }
+                    );
+                } catch (dbErr) {
+                    console.error("MongoDB sync (leave) error:", dbErr.message);
+                }
             }
         }
     });
