@@ -16,12 +16,15 @@ router.post("/instant", authMiddleware, async (req, res) => {
         // Generate a short 8-char ID from UUID (collision-safe enough for this scale)
         const roomId = uuidv4().replace(/-/g, "").slice(0, 8);
 
-        const room = await Room.create({
-            roomId,
-            createdBy: req.user.id,
-            isActive: true,
-            participants: [],
-        });
+        const room = await Room.findOneAndUpdate(
+            { roomId },
+            { 
+                createdBy: req.user.id, 
+                isActive: true, 
+                participants: [] 
+            },
+            { upsert: true, new: true }
+        );
 
         console.log(`📦 Instant room created: ${roomId} by ${req.user.email}`);
 
@@ -60,12 +63,15 @@ router.post("/", authMiddleware, async (req, res) => {
             return res.status(409).json({ error: "Room ID already in use" });
         }
 
-        const room = await Room.create({
-            roomId: trimmed,
-            createdBy: req.user.id,
-            isActive: true,
-            participants: [],
-        });
+        const room = await Room.findOneAndUpdate(
+            { roomId: trimmed },
+            { 
+                createdBy: req.user.id, 
+                isActive: true, 
+                participants: [] 
+            },
+            { upsert: true, new: true }
+        );
 
         console.log(`📦 Custom room created: ${trimmed} by ${req.user.email}`);
 

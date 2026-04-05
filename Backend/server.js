@@ -178,8 +178,9 @@ io.on("connection", (socket) => {
                     router,
                     peers: new Map(),
                     chatHistory: [], // starts empty
+                    creatorSocketId: socket.id, // first joiner = room creator
                 });
-                console.log(`📦 Room ${roomId} Mediasoup router created`);
+                console.log(`📦 Room ${roomId} Mediasoup router created — creator: ${socket.id}`);
             }
 
             const room = rooms.get(roomId);
@@ -202,6 +203,7 @@ io.on("connection", (socket) => {
             // Return the router's RTP capabilities — the client uses this to load its Mediasoup Device
             callback({
                 rtpCapabilities: room.router.rtpCapabilities,
+                isCreator: room.creatorSocketId === socket.id, // tell the client if they are the creator
             });
 
             // Tell everyone else that a new person just joined
@@ -213,6 +215,49 @@ io.on("connection", (socket) => {
         } catch (err) {
             console.error("join-room error:", err);
             callback({ error: err.message });
+        }
+    });
+
+    //   END ROOM (Creator only)                                            
+    //   The creator can forcibly close the room for everyone.              
+    //   Broadcasts 'room-closed', destroys all Mediasoup state, and marks  
+    //   the room inactive in MongoDB.                                      
+    socket.on("end-room", async () => {
+        const currentRoomId = socket.roomId;
+        if (!currentRoomId || !rooms.has(currentRoomId)) return;
+
+        const room = rooms.get(currentRoomId);
+
+        // Only the creator is allowed to end the room
+        if (room.creatorSocketId !== socket.id) {
+            console.warn(`⚠️  Non-creator ${socket.id} attempted to end room ${currentRoomId}`);
+            return;
+        }
+
+        console.log(`🔚 Creator ${socket.id} ended room ${currentRoomId}`);
+
+        // Notify every participant that the room is closed
+        io.to(currentRoomId).emit("room-closed", { reason: "Host ended the meeting" });
+
+        // Tear down all Mediasoup resources in the room
+        for (const [, peer] of room.peers) {
+            peer.producers.forEach((p) => p.close());
+            peer.consumers.forEach((c) => c.close());
+            peer.sendTransport?.close();
+            peer.recvTransport?.close();
+        }
+        room.router.close();
+        rooms.delete(currentRoomId);
+
+        // Mark room inactive in MongoDB
+        try {
+            await Room.findOneAndUpdate(
+                { roomId: currentRoomId },
+                { isActive: false, participants: [] }
+            );
+            console.log(`📝 Room ${currentRoomId} expired in MongoDB (creator ended call)`);
+        } catch (dbErr) {
+            console.error("MongoDB sync (end-room) error:", dbErr.message);
         }
     });
 
@@ -504,6 +549,35 @@ io.on("connection", (socket) => {
             const currentRoomId = socket.roomId;
             const room = rooms.get(currentRoomId);
             const peer = room.peers.get(socket.id);
+
+            // ── If the disconnecting socket is the CREATOR, close the whole room ──
+            if (room.creatorSocketId === socket.id) {
+                console.log(`🔚 Creator ${socket.id} disconnected — closing room ${currentRoomId}`);
+
+                // Notify all remaining participants
+                socket.to(currentRoomId).emit("room-closed", { reason: "Host left the meeting" });
+
+                // Tear down every peer's media resources
+                for (const [, p] of room.peers) {
+                    p.producers.forEach((prod) => prod.close());
+                    p.consumers.forEach((cons) => cons.close());
+                    p.sendTransport?.close();
+                    p.recvTransport?.close();
+                }
+                room.router.close();
+                rooms.delete(currentRoomId);
+
+                try {
+                    await Room.findOneAndUpdate(
+                        { roomId: currentRoomId },
+                        { isActive: false, participants: [] }
+                    );
+                    console.log(`📝 Room ${currentRoomId} expired in MongoDB (creator disconnected)`);
+                } catch (dbErr) {
+                    console.error("MongoDB sync (creator-disconnect) error:", dbErr.message);
+                }
+                return; // nothing more to do
+            }
 
             if (peer) {
                 // Close all media objects — this stops the RTP streams and frees memory

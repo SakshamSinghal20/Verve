@@ -168,6 +168,12 @@ function Room() {
     // Toast
     const [toast, setToast] = useState(null);
 
+    // Creator flag
+    const [isCreator, setIsCreator] = useState(false);
+
+    // Ended overlay (shown briefly before redirect)
+    const [roomEnded, setRoomEnded] = useState(false);
+
     // ── Helpers ─────────────────────────────────────────────
     function emitAsync(event, data = {}) {
         return new Promise((resolve, reject) => {
@@ -241,7 +247,8 @@ function Room() {
         async function init() {
             try {
                 setStatus("Joining room…");
-                const { rtpCapabilities } = await emitAsync("join-room", roomId);
+                const { rtpCapabilities, isCreator: creator } = await emitAsync("join-room", roomId);
+                if (creator) setIsCreator(true);
 
                 setStatus("Loading device…");
                 const device = new mediasoupClient.Device();
@@ -364,6 +371,20 @@ function Room() {
             });
         });
 
+        // ── Room closed by creator ──
+        // Fires for ALL participants (including the creator themselves via io.to)
+        socket.on("room-closed", ({ reason }) => {
+            setRoomEnded(true);
+            setToast({ msg: reason || "Meeting ended by host", hide: false });
+            // Clean up local media immediately
+            streamRef.current?.getTracks().forEach((t) => t.stop());
+            producersRef.current.forEach((p) => p.close());
+            consumersRef.current.forEach((c) => c.close());
+            sendTransportRef.current?.close();
+            recvTransportRef.current?.close();
+            setTimeout(() => navigate("/"), 2500);
+        });
+
         init();
 
         return () => {
@@ -374,6 +395,7 @@ function Room() {
             socket.off("new-message");
             socket.off("peers-list");
             socket.off("hand-raised");
+            socket.off("room-closed");
 
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
@@ -395,6 +417,19 @@ function Room() {
     }
 
     function handleLeave() {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        producersRef.current.forEach((p) => p.close());
+        consumersRef.current.forEach((c) => c.close());
+        screenProducerRef.current?.close();
+        sendTransportRef.current?.close();
+        recvTransportRef.current?.close();
+        navigate("/");
+    }
+
+    function handleEndMeeting() {
+        // Emit end-room — server will broadcast room-closed to everyone
+        socket.emit("end-room");
+        // Clean up creator's own resources; the room-closed listener will navigate
         streamRef.current?.getTracks().forEach((t) => t.stop());
         producersRef.current.forEach((p) => p.close());
         consumersRef.current.forEach((c) => c.close());
@@ -680,16 +715,40 @@ function Room() {
 
                 <div className="controls-divider" />
 
-                <button
-                    className="ctrl-btn leave"
-                    onClick={handleLeave}
-                    title="Leave meeting"
-                    id="btn-leave"
-                >
-                    <IconPhone />
-                    <span>Leave</span>
-                </button>
+                {isCreator ? (
+                    <button
+                        className="ctrl-btn end-meeting"
+                        onClick={handleEndMeeting}
+                        title="End meeting for everyone"
+                        id="btn-end-meeting"
+                    >
+                        <IconPhone />
+                        <span>End&nbsp;Meeting</span>
+                    </button>
+                ) : (
+                    <button
+                        className="ctrl-btn leave"
+                        onClick={handleLeave}
+                        title="Leave meeting"
+                        id="btn-leave"
+                    >
+                        <IconPhone />
+                        <span>Leave</span>
+                    </button>
+                )}
             </footer>
+
+            {/* ── Room-ended overlay ── */}
+            {roomEnded && (
+                <div className="room-ended-overlay">
+                    <div className="room-ended-card">
+                        <div className="room-ended-icon">📞</div>
+                        <h2>Meeting Ended</h2>
+                        <p>The host has ended this meeting.</p>
+                        <p className="room-ended-sub">Redirecting you to the home page…</p>
+                    </div>
+                </div>
+            )}
 
             {/* ── Toast ── */}
             {toast && (
