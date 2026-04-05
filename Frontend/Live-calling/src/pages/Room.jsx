@@ -137,6 +137,7 @@ function Room() {
     const streamRef        = useRef(null);
     const producersRef     = useRef([]);
     const consumersRef     = useRef([]);
+    const producerToPeerRef = useRef({}); // Mapping: producerId -> { peerId, type }
     const initializedRef   = useRef(false);
 
     // UI state
@@ -223,6 +224,9 @@ function Room() {
             };
 
             consumersRef.current.push(consumer);
+
+            // Save mapping for cleanup later
+            producerToPeerRef.current[producerId] = { peerId, type: (appData?.type === "screen" ? "screen" : "webcam") };
 
             setRemoteStreams((prev) => {
                 const existing = prev[peerId] || { webcam: new MediaStream(), screen: new MediaStream() };
@@ -353,6 +357,29 @@ function Room() {
         });
 
         sock.on("producer-closed", ({ producerId }) => {
+            console.log(`[Room] Producer closed: ${producerId}`);
+            
+            const mapping = producerToPeerRef.current[producerId];
+            const consumer = consumersRef.current.find((c) => c.producerId === producerId);
+
+            if (consumer) {
+                consumer.track.stop();
+                consumer.close();
+            }
+
+            if (mapping) {
+                const { peerId, type } = mapping;
+                setRemoteStreams((prev) => {
+                    const streams = prev[peerId];
+                    if (streams && streams[type]) {
+                        // Remove the specific track from the MediaStream objects
+                        if (consumer) streams[type].removeTrack(consumer.track);
+                    }
+                    return { ...prev }; // Trigger re-render
+                });
+                delete producerToPeerRef.current[producerId];
+            }
+
             consumersRef.current = consumersRef.current.filter((c) => c.producerId !== producerId);
         });
 
@@ -436,7 +463,7 @@ function Room() {
 
     function handleEndMeeting() {
         // Emit end-room — server will broadcast room-closed to everyone
-        socket.emit("end-room");
+        socketRef.current.emit("end-room");
         // Clean up creator's own resources; the room-closed listener will navigate
         streamRef.current?.getTracks().forEach((t) => t.stop());
         producersRef.current.forEach((p) => p.close());
