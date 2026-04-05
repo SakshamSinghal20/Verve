@@ -23,21 +23,20 @@ function authMiddleware(req, res, next) {
 
 /**
  * Socket.io middleware: verifies JWT from handshake auth.
- * Allows unauthenticated connections for backward compat.
+ * Rejects unauthenticated connections — a valid token is required.
  */
 function socketAuthMiddleware(socket, next) {
     const token = socket.handshake.auth?.token;
     if (!token) {
-        socket.user = null;
-        return next();
+        return next(new Error("Authentication required"));
     }
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        socket.user = decoded;
+        socket.user = decoded;   // { id, name, email, iat, exp }
         next();
     } catch {
-        next(new Error("Authentication error"));
+        next(new Error("Invalid or expired token"));
     }
 }
 

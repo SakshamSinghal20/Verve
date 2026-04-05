@@ -2,8 +2,9 @@
 //  All WebRTC / Mediasoup / Socket.IO logic is PRESERVED EXACTLY.
 //  Each tab creates its own isolated socket — tabs no longer share one connection.
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
 import { createSocket } from "../socket";
 import * as mediasoupClient from "mediasoup-client";
 import "./Room.css";
@@ -95,7 +96,7 @@ function peerColor(peerId) {
 }
 
 // ── RemoteVideo ────────────────────────────────────────────
-function RemoteVideo({ peerId, stream, handRaised }) {
+function RemoteVideo({ peerId, peerName, stream, handRaised }) {
     const videoRef = useRef(null);
 
     useEffect(() => {
@@ -105,6 +106,7 @@ function RemoteVideo({ peerId, stream, handRaised }) {
     }, [stream]);
 
     const hasVideo = stream && stream.getVideoTracks().some((t) => t.enabled && t.readyState === "live");
+    const displayName = peerName || `Peer ${peerId.slice(0, 6)}`;
 
     return (
         <div className="video-card remote">
@@ -112,12 +114,12 @@ function RemoteVideo({ peerId, stream, handRaised }) {
             {!hasVideo && (
                 <div className="cam-off-overlay">
                     <div className="cam-off-avatar" style={{ background: peerColor(peerId) }}>
-                        {peerId.slice(0, 1).toUpperCase()}
+                        {displayName.slice(0, 1).toUpperCase()}
                     </div>
-                    <p>Peer {peerId.slice(0, 6)}</p>
+                    <p>{displayName}</p>
                 </div>
             )}
-            <div className="video-label">Peer {peerId.slice(0, 6)}</div>
+            <div className="video-label">{displayName}</div>
             {handRaised && <div className="hand-badge">✋</div>}
         </div>
     );
@@ -128,7 +130,9 @@ function Room() {
     const { roomId } = useParams();
     const navigate   = useNavigate();
 
-    // Refs — Mediasoup objects + socket don't need to trigger re-renders
+    // Auth context — provides current logged-in user
+    const { user, loading: authLoading } = useContext(AuthContext);
+
     const socketRef         = useRef(null);
     const localVideoRef    = useRef(null);
     const deviceRef        = useRef(null);
@@ -146,6 +150,11 @@ function Room() {
     const [isCamOff,      setIsCamOff]      = useState(false);
     const [remoteStreams,  setRemoteStreams]  = useState({});
     const [peerCount,     setPeerCount]     = useState(0);
+
+    // Identity map: socketId → { userId, name } — single source of truth for all labels
+    const [peerInfo,      setPeerInfo]      = useState({});
+    // My own confirmed userId from the server's join-room callback
+    const myUserIdRef = useRef(null);
 
     // Chat
     const [chatOpen,     setChatOpen]     = useState(false);
@@ -245,8 +254,16 @@ function Room() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // ── Auth guard — redirect unauthenticated users before any WebRTC work —
+    useEffect(() => {
+        if (authLoading) return;
+        if (!user) navigate("/login", { replace: true });
+    }, [user, authLoading, navigate]);
+
     // ── Main init effect ────────────────────────────────────
     useEffect(() => {
+        // Don't start until auth has resolved and we have a confirmed user
+        if (authLoading || !user) return;
         if (initializedRef.current) return;
         initializedRef.current = true;
 
@@ -258,8 +275,17 @@ function Room() {
         async function init() {
             try {
                 setStatus("Joining room…");
-                const { rtpCapabilities, isCreator: creator } = await emitAsync("join-room", roomId);
+                const { rtpCapabilities, isCreator: creator, myUserId, myName } = await emitAsync("join-room", roomId);
                 if (creator) setIsCreator(true);
+
+                // Store my confirmed userId — used for "You" label (stable across tabs)
+                myUserIdRef.current = myUserId;
+
+                // Register myself in peerInfo so the participants panel shows my name
+                const mySocketId = socketRef.current?.id;
+                if (mySocketId && myUserId && myName) {
+                    setPeerInfo((prev) => ({ ...prev, [mySocketId]: { userId: myUserId, name: myName } }));
+                }
 
                 setStatus("Loading device…");
                 const device = new mediasoupClient.Device();
@@ -319,6 +345,14 @@ function Room() {
                 setStatus("live");
 
                 const { producers } = await emitAsync("get-producers");
+                // Populate peerInfo from the existing producers list
+                const infoFromProducers = {};
+                producers.forEach(({ peerId, userId, name }) => {
+                    if (userId && name) infoFromProducers[peerId] = { userId, name };
+                });
+                if (Object.keys(infoFromProducers).length) {
+                    setPeerInfo((prev) => ({ ...prev, ...infoFromProducers }));
+                }
                 setPeerCount(new Set(producers.map((p) => p.peerId)).size);
                 for (const { producerId, peerId, kind, appData } of producers) {
                     await consumeProducer(producerId, peerId, kind, appData);
@@ -343,16 +377,17 @@ function Room() {
             await consumeProducer(producerId, peerId, kind, appData);
         });
 
-        sock.on("new-peer", ({ peerId }) => {
-            console.log("[Room] New peer:", peerId);
+        sock.on("new-peer", ({ peerId, userId, name }) => {
+            console.log("[Room] New peer:", name || peerId);
+            // Pre-fill identity before they start producing
+            if (userId && name) {
+                setPeerInfo((prev) => ({ ...prev, [peerId]: { userId, name } }));
+            }
         });
 
         sock.on("peer-left", ({ peerId }) => {
-            setRemoteStreams((prev) => {
-                const updated = { ...prev };
-                delete updated[peerId];
-                return updated;
-            });
+            setRemoteStreams((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
+            setPeerInfo((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
             setPeerCount((prev) => Math.max(0, prev - 1));
         });
 
@@ -392,15 +427,23 @@ function Room() {
         });
 
         sock.on("peers-list", ({ peers }) => {
+            // peers is now [{peerId, userId, name}]
+            const infoMap = {};
+            peers.forEach(({ peerId, userId, name }) => {
+                if (peerId) infoMap[peerId] = { userId: userId || peerId, name: name || `Peer ${peerId.slice(0,6)}` };
+            });
+            setPeerInfo((prev) => ({ ...prev, ...infoMap }));
             setPeersList(peers);
             setPeerCount(peers.length);
         });
 
-        sock.on("hand-raised", ({ peerId, raised }) => {
+        sock.on("hand-raised", ({ peerId, userId, raised }) => {
+            // Key raisedHands by userId so it works across multiple tabs of the same user
+            const key = userId || peerId;
             setRaisedHands((prev) => {
                 const updated = { ...prev };
-                if (raised) updated[peerId] = true;
-                else delete updated[peerId];
+                if (raised) updated[key] = true;
+                else delete updated[key];
                 return updated;
             });
         });
@@ -426,6 +469,13 @@ function Room() {
             sock.once("connect", () => init());
         }
 
+        // Handle JWT auth failure mid-session (expired token)
+        sock.on("connect_error", (err) => {
+            if (err.message === "Authentication required" || err.message === "Invalid or expired token") {
+                navigate("/login", { replace: true });
+            }
+        });
+
         return () => {
             // Tear down all media
             streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -437,7 +487,7 @@ function Room() {
             // Disconnect THIS tab's socket — server fires disconnect only for this socket.id
             sock.disconnect();
         };
-    }, [roomId, consumeProducer]);
+    }, [roomId, consumeProducer, user, authLoading]);
 
     // ── Controls ─────────────────────────────────────────────
     function toggleMute() {
@@ -504,7 +554,9 @@ function Room() {
         }
     }
 
-    const myHandRaised = raisedHands[socketRef.current?.id] || false;
+    // My raise-hand state — keyed by userId so both tabs of same person reflect it
+    const myUserId = myUserIdRef.current || user?.id;
+    const myHandRaised = myUserId ? (raisedHands[myUserId] || false) : false;
 
     function toggleRaiseHand() {
         const newState = !myHandRaised;
@@ -549,6 +601,15 @@ function Room() {
     const statusClass = status === "live" ? "live" : status === "error" ? "error" : "pending";
     const statusLabel = status === "live" ? "Live" : status === "error" ? "Connection failed" : status;
 
+    // Auth loading guard — show spinner while token is being verified
+    if (authLoading) {
+        return (
+            <div className="room-container" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ color: "#aaa", fontSize: "1.1rem" }}>Verifying session…</div>
+            </div>
+        );
+    }
+
     return (
         <div className="room-container">
             {/* ── Header ── */}
@@ -576,7 +637,7 @@ function Room() {
 
             {/* ── Video stage ── */}
             <main className={`video-stage ${gridClass}`}>
-                {/* Local tile */}
+                {/* Local tile — always shows "You (Name)" so identity is unambiguous */}
                 <div className="video-card local">
                     <video
                         ref={localVideoRef}
@@ -585,13 +646,13 @@ function Room() {
                     />
                     {isCamOff && (
                         <div className="cam-off-overlay">
-                            <div className="cam-off-avatar">Y</div>
+                            <div className="cam-off-avatar">{(user?.name || "Y").slice(0,1).toUpperCase()}</div>
                             <p>Camera Off</p>
                         </div>
                     )}
                     {isScreenSharing && <div className="screen-share-badge">Sharing screen</div>}
-                    <div className="video-label">You</div>
-                    {raisedHands[socketRef.current?.id] && <div className="hand-badge">✋</div>}
+                    <div className="video-label">You {user?.name ? `(${user.name})` : ""}</div>
+                    {myHandRaised && <div className="hand-badge">✋</div>}
                 </div>
 
                 {/* Local Screen Share Tile */}
@@ -605,23 +666,34 @@ function Room() {
                     </div>
                 )}
 
-                {/* Remote tiles */}
-                {Object.entries(remoteStreams).map(([peerId, streams]) => (
-                    <React.Fragment key={peerId}>
-                        <RemoteVideo
-                            peerId={peerId}
-                            stream={streams.webcam}
-                            handRaised={!!raisedHands[peerId]}
-                        />
-                        {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
+                {/* Remote tiles — names resolved from peerInfo map */}
+                {Object.entries(remoteStreams).map(([peerId, streams]) => {
+                    const info = peerInfo[peerId];
+                    const resolvedName = info?.name || `Peer ${peerId.slice(0, 6)}`;
+                    // If this remote peer is the same user (different tab) — label them clearly
+                    const isSameUser = info?.userId && info.userId === myUserId;
+                    const displayName = isSameUser ? `${resolvedName} (other tab)` : resolvedName;
+                    // Look up hand-raised by userId key
+                    const handKey = info?.userId || peerId;
+                    return (
+                        <React.Fragment key={peerId}>
                             <RemoteVideo
-                                peerId={`${peerId}-screen`}
-                                stream={streams.screen}
-                                handRaised={false}
+                                peerId={peerId}
+                                peerName={displayName}
+                                stream={streams.webcam}
+                                handRaised={!!raisedHands[handKey]}
                             />
-                        )}
-                    </React.Fragment>
-                ))}
+                            {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
+                                <RemoteVideo
+                                    peerId={`${peerId}-screen`}
+                                    peerName={`${displayName}'s Screen`}
+                                    stream={streams.screen}
+                                    handRaised={false}
+                                />
+                            )}
+                        </React.Fragment>
+                    );
+                })}
             </main>
 
             {/* ── Chat panel ── */}
@@ -634,17 +706,24 @@ function Room() {
                     {chatMessages.length === 0 && (
                         <p className="chat-empty">No messages yet.<br />Say hi! 👋</p>
                     )}
-                    {chatMessages.map((msg, i) => (
-                        <div key={i} className={`chat-bubble ${msg.peerId === socketRef.current?.id ? "self" : ""}`}>
-                            <span className="chat-sender">
-                                {msg.peerId === socketRef.current?.id ? "You" : `Peer ${msg.peerId.slice(0, 6)}`}
-                            </span>
-                            <p className="chat-text">{msg.message}</p>
-                            <span className="chat-time">
-                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                        </div>
-                    ))}
+                    {chatMessages.map((msg, i) => {
+                        // Self-detection via userId — correct across multiple tabs
+                        const isSelf = msg.userId
+                            ? msg.userId === myUserId
+                            : msg.peerId === socketRef.current?.id;
+                        const senderName = isSelf
+                            ? "You"
+                            : (msg.name || peerInfo[msg.peerId]?.name || `Peer ${(msg.peerId || "").slice(0, 6)}`);
+                        return (
+                            <div key={i} className={`chat-bubble ${isSelf ? "self" : ""}`}>
+                                <span className="chat-sender">{senderName}</span>
+                                <p className="chat-text">{msg.message}</p>
+                                <span className="chat-time">
+                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                            </div>
+                        );
+                    })}
                     <div ref={chatEndRef} />
                 </div>
                 <div className="chat-input-group">
@@ -669,17 +748,24 @@ function Room() {
                     <button className="chat-close" onClick={() => setParticipantsOpen(false)}>✕</button>
                 </div>
                 <div className="participants-list">
-                    {peersList.map((pid) => (
-                        <div key={pid} className="participant-item">
-                            <div className="participant-avatar" style={{ background: peerColor(pid) }}>
-                                {pid === socketRef.current?.id ? "Y" : pid.slice(0, 1).toUpperCase()}
+                    {peersList.map((peerEntry) => {
+                        // peersList items are now {peerId, userId, name} objects
+                        const pid = peerEntry?.peerId || peerEntry;
+                        const info = peerInfo[pid] || peerEntry;
+                        const name = info?.name || `Peer ${String(pid).slice(0, 6)}`;
+                        const isMe = info?.userId && info.userId === myUserId;
+                        return (
+                            <div key={pid} className="participant-item">
+                                <div className="participant-avatar" style={{ background: peerColor(pid) }}>
+                                    {name.slice(0, 1).toUpperCase()}
+                                </div>
+                                <span className="participant-name">
+                                    {isMe ? `${name} (You)` : name}
+                                </span>
+                                {isMe && <span className="participant-you-tag">You</span>}
                             </div>
-                            <span className="participant-name">
-                                {pid === socketRef.current?.id ? "You" : `Peer ${pid.slice(0, 6)}`}
-                            </span>
-                            {pid === socketRef.current?.id && <span className="participant-you-tag">You</span>}
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
 

@@ -117,13 +117,14 @@ function App() {
 
     // ── 3) Join Existing Room ───────────────────────────────
     async function handleJoin() {
+        if (!user) { navigate("/login"); return; }
         const trimmed = roomId.trim().toLowerCase();
         if (!trimmed) return;
         setLoadingJoin(true);
         try {
             const res = await fetch(`${API_URL}/api/rooms/join`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: authHeaders(),
                 body: JSON.stringify({ roomId: trimmed }),
             });
             const data = await res.json();

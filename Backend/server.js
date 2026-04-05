@@ -101,6 +101,8 @@ const mediaCodecs = [
 //  └─ roomId
 //      ├─ router      → Mediasoup Router (one per room, handles codec negotiation)
 //      ├─ chatHistory → Array of messages (capped at 200)
+//      ├─ creatorUserId → userId of the room creator (for multi-tab safe creator check)
+//      ├─ usersInRoom → Map: socketId → { userId, name }  (identity registry)
 //      └─ peers (Map)
 //          └─ socketId
 //              ├─ sendTransport → Transport for this peer's outgoing media
@@ -124,6 +126,14 @@ function getOrCreatePeer(roomId, socketId) {
         });
     }
     return room.peers.get(socketId);
+}
+
+// Build the full peers list with user identity for a room
+function buildPeersList(room) {
+    return Array.from(room.peers.keys()).map((pid) => {
+        const info = room.usersInRoom.get(pid) || { userId: pid, name: "Unknown" };
+        return { peerId: pid, userId: info.userId, name: info.name };
+    });
 }
 
 // ── WebRTC Transport factory 
@@ -167,6 +177,13 @@ io.on("connection", (socket) => {
                 return callback({ error: "Server not ready" });
             }
 
+            // Require authenticated user — socket middleware already verified the JWT
+            if (!socket.user) {
+                return callback({ error: "Authentication required" });
+            }
+
+            const { id: userId, name } = socket.user;
+
             // Add this socket to Socket.IO's room (for group broadcasting later)
             socket.join(roomId);
             socket.roomId = roomId;
@@ -177,14 +194,18 @@ io.on("connection", (socket) => {
                 rooms.set(roomId, {
                     router,
                     peers: new Map(),
-                    chatHistory: [], // starts empty
-                    creatorSocketId: socket.id, // first joiner = room creator
+                    usersInRoom: new Map(), // socketId → { userId, name }
+                    chatHistory: [],         // starts empty
+                    creatorUserId: userId,   // creator identified by userId, not socketId
                 });
-                console.log(`📦 Room ${roomId} Mediasoup router created — creator: ${socket.id}`);
+                console.log(`📦 Room ${roomId} Mediasoup router created — creator: ${name} (${userId})`);
             }
 
             const room = rooms.get(roomId);
             getOrCreatePeer(roomId, socket.id); // register this peer in the room
+
+            // Register identity in usersInRoom map
+            room.usersInRoom.set(socket.id, { userId, name });
 
             // ── Sync with MongoDB: add this socket to participants ──
             try {
@@ -198,20 +219,25 @@ io.on("connection", (socket) => {
                 // Non-fatal — Mediasoup still works even if DB sync fails
             }
 
-            console.log(`✅ Socket ${socket.id} joined room ${roomId} (${room.peers.size} peers)`);
+            console.log(`✅ ${name} (${userId}) socket ${socket.id} joined room ${roomId} (${room.peers.size} peers)`);
+
+            // isCreator is now userId-based — works correctly across multiple tabs
+            const isCreator = room.creatorUserId === userId;
 
             // Return the router's RTP capabilities — the client uses this to load its Mediasoup Device
             callback({
                 rtpCapabilities: room.router.rtpCapabilities,
-                isCreator: room.creatorSocketId === socket.id, // tell the client if they are the creator
+                isCreator,
+                // Also tell this socket its own resolved identity
+                myUserId: userId,
+                myName: name,
             });
 
-            // Tell everyone else that a new person just joined
-            socket.to(roomId).emit("new-peer", { peerId: socket.id });
+            // Tell everyone else that a new person just joined — include real identity
+            socket.to(roomId).emit("new-peer", { peerId: socket.id, userId, name });
 
-            // Send the full list of peer IDs in the room to everyone (including the new joiner)
-            const peerIds = Array.from(room.peers.keys());
-            io.to(roomId).emit("peers-list", { peers: peerIds });
+            // Send the full peers list with identity to everyone (including the new joiner)
+            io.to(roomId).emit("peers-list", { peers: buildPeersList(room) });
         } catch (err) {
             console.error("join-room error:", err);
             callback({ error: err.message });
@@ -228,9 +254,10 @@ io.on("connection", (socket) => {
 
         const room = rooms.get(currentRoomId);
 
-        // Only the creator is allowed to end the room
-        if (room.creatorSocketId !== socket.id) {
-            console.warn(`⚠️  Non-creator ${socket.id} attempted to end room ${currentRoomId}`);
+        // Creator check is now userId-based — works correctly even if creator has multiple tabs open
+        const requestingUserId = socket.user?.id;
+        if (room.creatorUserId !== requestingUserId) {
+            console.warn(`⚠️  Non-creator ${socket.id} (${requestingUserId}) attempted to end room ${currentRoomId}`);
             return;
         }
 
@@ -369,9 +396,14 @@ io.on("connection", (socket) => {
             callback({ id: producer.id });
 
             // Notify everyone else in the room so they can start consuming this stream
+            // Include user identity so the receiver can label the video tile correctly
+            const room = rooms.get(socket.roomId);
+            const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
             socket.to(socket.roomId).emit("new-producer", {
                 producerId: producer.id,
                 peerId: socket.id,
+                userId: identity.userId,
+                name: identity.name,
                 kind,
                 appData,
             });
@@ -492,10 +524,14 @@ io.on("connection", (socket) => {
             const room = rooms.get(socket.roomId);
             if (!room) return callback?.({ error: "Room not found" });
 
+            const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+
             const chatMessage = {
-                peerId: socket.id,   // who sent it
-                message,                // the text
-                timestamp: Date.now(),  // when it was sent
+                peerId: socket.id,        // socket identity (for self-detection in UI)
+                userId: identity.userId,  // stable user identity across tabs
+                name: identity.name,      // display name
+                message,
+                timestamp: Date.now(),
             };
 
             // Keep history in memory, capped at 200 so we don't use too much RAM
@@ -531,9 +567,13 @@ io.on("connection", (socket) => {
     //   Just relay the raised/lowered status to everyone in the room.      
     socket.on("raise-hand", ({ raised }) => {
         if (!socket.roomId) return;
+        const room = rooms.get(socket.roomId);
+        const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
         // Forward to all peers in the room (including the sender)
         io.to(socket.roomId).emit("hand-raised", {
             peerId: socket.id,
+            userId: identity.userId,
+            name: identity.name,
             raised,             // true = hand up, false = hand down
         });
     });
@@ -550,9 +590,15 @@ io.on("connection", (socket) => {
             const room = rooms.get(currentRoomId);
             const peer = room.peers.get(socket.id);
 
-            // ── If the disconnecting socket is the CREATOR, close the whole room ──
-            if (room.creatorSocketId === socket.id) {
-                console.log(`🔚 Creator ${socket.id} disconnected — closing room ${currentRoomId}`);
+            // ── If the disconnecting socket is the CREATOR (userId match), close the whole room ──
+            // We check userId not socketId so it works even if creator had multiple tabs
+            const disconnectingUserId = socket.user?.id;
+            const isLastCreatorTab = room.creatorUserId === disconnectingUserId &&
+                // check no other tabs of the same userId remain in the room
+                Array.from(room.usersInRoom.values()).filter(u => u.userId === disconnectingUserId).length <= 1;
+
+            if (isLastCreatorTab) {
+                console.log(`🔚 Creator ${socket.user?.name} (last tab) disconnected — closing room ${currentRoomId}`);
 
                 // Notify all remaining participants
                 socket.to(currentRoomId).emit("room-closed", { reason: "Host left the meeting" });
@@ -586,16 +632,23 @@ io.on("connection", (socket) => {
                 peer.sendTransport?.close();
                 peer.recvTransport?.close();
 
-                // Remove this peer from the room
+                // Remove this peer from the room (both media and identity maps)
                 room.peers.delete(socket.id);
+                room.usersInRoom.delete(socket.id);
             }
 
-            // Tell the remaining peers that this person left
-            socket.to(currentRoomId).emit("peer-left", { peerId: socket.id });
+            // Tell the remaining peers that this person left — include userId so frontend can match
+            const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+            socket.to(currentRoomId).emit("peer-left", {
+                peerId: socket.id,
+                userId: leftIdentity.userId,
+            });
 
-            // Broadcast the updated list so UI peer counts stay accurate
-            const peerIds = Array.from(room.peers.keys());
-            io.to(currentRoomId).emit("peers-list", { peers: peerIds });
+            // Remove from identity map after emitting (so buildPeersList still has it for any final use)
+            room.usersInRoom.delete(socket.id);
+
+            // Broadcast the updated list with identity so UI peer counts and names stay accurate
+            io.to(currentRoomId).emit("peers-list", { peers: buildPeersList(room) });
 
             // If the room is now empty, destroy it to free all resources
             if (room.peers.size === 0) {

@@ -91,9 +91,9 @@ router.post("/", authMiddleware, async (req, res) => {
 
 // ── Join Room ───────────────────────────────────────────────────────────────
 // POST /api/rooms/join
-// No auth required (guests can join via link).
+// Auth required — only logged-in users can join or validate a room.
 // Validates the room exists and is active before the client navigates.
-router.post("/join", async (req, res) => {
+router.post("/join", authMiddleware, async (req, res) => {
     try {
         const { roomId } = req.body;
 
