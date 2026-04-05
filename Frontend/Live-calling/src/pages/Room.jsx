@@ -372,7 +372,11 @@ function Room() {
         }
 
         // ── Socket listeners ─────────────────────────────────
-        sock.on("new-producer", async ({ producerId, peerId, kind, appData }) => {
+        sock.on("new-producer", async ({ producerId, peerId, userId, name, kind, appData }) => {
+            // Always update peerInfo from new-producer identity — belt-and-suspenders
+            if (peerId && userId && name) {
+                setPeerInfo((prev) => ({ ...prev, [peerId]: { userId, name } }));
+            }
             setPeerCount((prev) => prev + (kind === "video" && (!appData || appData.type !== "screen") ? 1 : 0));
             await consumeProducer(producerId, peerId, kind, appData);
         });
@@ -427,10 +431,12 @@ function Room() {
         });
 
         sock.on("peers-list", ({ peers }) => {
-            // peers is now [{peerId, userId, name}]
+            // peers is [{peerId, userId, name}] — always use server-provided name
             const infoMap = {};
             peers.forEach(({ peerId, userId, name }) => {
-                if (peerId) infoMap[peerId] = { userId: userId || peerId, name: name || `Peer ${peerId.slice(0,6)}` };
+                if (peerId && name) {
+                    infoMap[peerId] = { userId: userId || peerId, name };
+                }
             });
             setPeerInfo((prev) => ({ ...prev, ...infoMap }));
             setPeersList(peers);

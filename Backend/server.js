@@ -630,6 +630,9 @@ io.on("connection", (socket) => {
                 return; // nothing more to do
             }
 
+            // Read identity BEFORE deleting — needed for the peer-left broadcast
+            const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+
             if (peer) {
                 // Close all media objects — this stops the RTP streams and frees memory
                 peer.producers.forEach((producer) => producer.close());
@@ -637,19 +640,17 @@ io.on("connection", (socket) => {
                 peer.sendTransport?.close();
                 peer.recvTransport?.close();
 
-                // Remove this peer from the room (both media and identity maps)
+                // Remove this peer from the room
                 room.peers.delete(socket.id);
-                room.usersInRoom.delete(socket.id);
             }
 
             // Tell the remaining peers that this person left — include userId so frontend can match
-            const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
             socket.to(currentRoomId).emit("peer-left", {
                 peerId: socket.id,
                 userId: leftIdentity.userId,
             });
 
-            // Remove from identity map after emitting (so buildPeersList still has it for any final use)
+            // Now remove from identity map (after emitting, so buildPeersList still had it)
             room.usersInRoom.delete(socket.id);
 
             // Broadcast the updated list with identity so UI peer counts and names stay accurate

@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
 const JWT_SECRET = process.env.JWT_SECRET || "verve-dev-secret-change-me";
 
@@ -24,8 +25,9 @@ function authMiddleware(req, res, next) {
 /**
  * Socket.io middleware: verifies JWT from handshake auth.
  * Rejects unauthenticated connections — a valid token is required.
+ * Always fetches the user from DB to guarantee a fresh, correct name.
  */
-function socketAuthMiddleware(socket, next) {
+async function socketAuthMiddleware(socket, next) {
     const token = socket.handshake.auth?.token;
     if (!token) {
         return next(new Error("Authentication required"));
@@ -33,9 +35,22 @@ function socketAuthMiddleware(socket, next) {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        socket.user = decoded;   // { id, name, email, iat, exp }
+
+        // Always look up the user from DB to get the current name
+        // This prevents stale JWTs (missing or outdated name) from
+        // causing "Peer xxxxx" labels instead of real names
+        const dbUser = await User.findById(decoded.id).select("name email").lean();
+        if (!dbUser) {
+            return next(new Error("User not found — please register or log in again"));
+        }
+
+        socket.user = {
+            id: decoded.id,
+            name: dbUser.name,      // always fresh from DB
+            email: dbUser.email,
+        };
         next();
-    } catch {
+    } catch (err) {
         next(new Error("Invalid or expired token"));
     }
 }
