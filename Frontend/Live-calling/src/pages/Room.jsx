@@ -1,10 +1,10 @@
 //  Room.jsx — Video call screen
 //  All WebRTC / Mediasoup / Socket.IO logic is PRESERVED EXACTLY.
-//  Only the JSX markup and icon rendering are updated for the new design.
+//  Each tab creates its own isolated socket — tabs no longer share one connection.
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { socket } from "../App";
+import { createSocket } from "../socket";
 import * as mediasoupClient from "mediasoup-client";
 import "./Room.css";
 
@@ -128,7 +128,8 @@ function Room() {
     const { roomId } = useParams();
     const navigate   = useNavigate();
 
-    // Refs — Mediasoup objects don't need to trigger re-renders
+    // Refs — Mediasoup objects + socket don't need to trigger re-renders
+    const socketRef         = useRef(null);
     const localVideoRef    = useRef(null);
     const deviceRef        = useRef(null);
     const sendTransportRef = useRef(null);
@@ -177,7 +178,7 @@ function Room() {
     // ── Helpers ─────────────────────────────────────────────
     function emitAsync(event, data = {}) {
         return new Promise((resolve, reject) => {
-            socket.emit(event, data, (response) => {
+            socketRef.current.emit(event, data, (response) => {
                 if (response?.error) reject(new Error(response.error));
                 else resolve(response);
             });
@@ -237,12 +238,18 @@ function Room() {
         } catch (err) {
             console.error(`[Room] Failed to consume ${kind} from ${peerId}:`, err);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ── Main init effect ────────────────────────────────────
     useEffect(() => {
         if (initializedRef.current) return;
         initializedRef.current = true;
+
+        // Create a fresh socket for THIS tab and connect it
+        const sock = createSocket();
+        socketRef.current = sock;
+        sock.connect();
 
         async function init() {
             try {
@@ -265,8 +272,8 @@ function Room() {
                         .then(() => callback()).catch(errback);
                 });
 
-                sendTransport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
-                    emitAsync("produce", { transportId: sendTransport.id, kind, rtpParameters })
+                sendTransport.on("produce", ({ kind, rtpParameters, appData }, callback, errback) => {
+                    emitAsync("produce", { transportId: sendTransport.id, kind, rtpParameters, appData })
                         .then(({ id }) => callback({ id })).catch(errback);
                 });
 
@@ -327,16 +334,16 @@ function Room() {
         }
 
         // ── Socket listeners ─────────────────────────────────
-        socket.on("new-producer", async ({ producerId, peerId, kind, appData }) => {
+        sock.on("new-producer", async ({ producerId, peerId, kind, appData }) => {
             setPeerCount((prev) => prev + (kind === "video" && (!appData || appData.type !== "screen") ? 1 : 0));
             await consumeProducer(producerId, peerId, kind, appData);
         });
 
-        socket.on("new-peer", ({ peerId }) => {
+        sock.on("new-peer", ({ peerId }) => {
             console.log("[Room] New peer:", peerId);
         });
 
-        socket.on("peer-left", ({ peerId }) => {
+        sock.on("peer-left", ({ peerId }) => {
             setRemoteStreams((prev) => {
                 const updated = { ...prev };
                 delete updated[peerId];
@@ -345,11 +352,11 @@ function Room() {
             setPeerCount((prev) => Math.max(0, prev - 1));
         });
 
-        socket.on("producer-closed", ({ producerId }) => {
+        sock.on("producer-closed", ({ producerId }) => {
             consumersRef.current = consumersRef.current.filter((c) => c.producerId !== producerId);
         });
 
-        socket.on("new-message", (msg) => {
+        sock.on("new-message", (msg) => {
             setChatMessages((prev) => [...prev, msg]);
             setChatOpen((open) => {
                 if (!open) setUnreadCount((c) => c + 1);
@@ -357,12 +364,12 @@ function Room() {
             });
         });
 
-        socket.on("peers-list", ({ peers }) => {
+        sock.on("peers-list", ({ peers }) => {
             setPeersList(peers);
             setPeerCount(peers.length);
         });
 
-        socket.on("hand-raised", ({ peerId, raised }) => {
+        sock.on("hand-raised", ({ peerId, raised }) => {
             setRaisedHands((prev) => {
                 const updated = { ...prev };
                 if (raised) updated[peerId] = true;
@@ -373,7 +380,7 @@ function Room() {
 
         // ── Room closed by creator ──
         // Fires for ALL participants (including the creator themselves via io.to)
-        socket.on("room-closed", ({ reason }) => {
+        sock.on("room-closed", ({ reason }) => {
             setRoomEnded(true);
             setToast({ msg: reason || "Meeting ended by host", hide: false });
             // Clean up local media immediately
@@ -385,23 +392,23 @@ function Room() {
             setTimeout(() => navigate("/"), 2500);
         });
 
-        init();
+        // Wait for socket to connect before running the WebRTC init
+        if (sock.connected) {
+            init();
+        } else {
+            sock.once("connect", () => init());
+        }
 
         return () => {
-            socket.off("new-producer");
-            socket.off("new-peer");
-            socket.off("peer-left");
-            socket.off("producer-closed");
-            socket.off("new-message");
-            socket.off("peers-list");
-            socket.off("hand-raised");
-            socket.off("room-closed");
-
+            // Tear down all media
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
             consumersRef.current.forEach((c) => c.close());
             sendTransportRef.current?.close();
             recvTransportRef.current?.close();
+
+            // Disconnect THIS tab's socket — server fires disconnect only for this socket.id
+            sock.disconnect();
         };
     }, [roomId, consumeProducer]);
 
@@ -423,6 +430,7 @@ function Room() {
         screenProducerRef.current?.close();
         sendTransportRef.current?.close();
         recvTransportRef.current?.close();
+        socketRef.current?.disconnect();
         navigate("/");
     }
 
@@ -469,14 +477,14 @@ function Room() {
         }
     }
 
-    const myHandRaised = raisedHands[socket.id] || false;
+    const myHandRaised = raisedHands[socketRef.current?.id] || false;
 
     function toggleRaiseHand() {
         const newState = !myHandRaised;
-        socket.emit("raise-hand", { raised: newState });
+        socketRef.current?.emit("raise-hand", { raised: newState });
         if (raiseTimerRef.current) clearTimeout(raiseTimerRef.current);
         if (newState) {
-            raiseTimerRef.current = setTimeout(() => socket.emit("raise-hand", { raised: false }), 30000);
+            raiseTimerRef.current = setTimeout(() => socketRef.current?.emit("raise-hand", { raised: false }), 30000);
         }
     }
 
@@ -556,7 +564,7 @@ function Room() {
                     )}
                     {isScreenSharing && <div className="screen-share-badge">Sharing screen</div>}
                     <div className="video-label">You</div>
-                    {raisedHands[socket.id] && <div className="hand-badge">✋</div>}
+                    {raisedHands[socketRef.current?.id] && <div className="hand-badge">✋</div>}
                 </div>
 
                 {/* Local Screen Share Tile */}
@@ -600,9 +608,9 @@ function Room() {
                         <p className="chat-empty">No messages yet.<br />Say hi! 👋</p>
                     )}
                     {chatMessages.map((msg, i) => (
-                        <div key={i} className={`chat-bubble ${msg.peerId === socket.id ? "self" : ""}`}>
+                        <div key={i} className={`chat-bubble ${msg.peerId === socketRef.current?.id ? "self" : ""}`}>
                             <span className="chat-sender">
-                                {msg.peerId === socket.id ? "You" : `Peer ${msg.peerId.slice(0, 6)}`}
+                                {msg.peerId === socketRef.current?.id ? "You" : `Peer ${msg.peerId.slice(0, 6)}`}
                             </span>
                             <p className="chat-text">{msg.message}</p>
                             <span className="chat-time">
@@ -637,12 +645,12 @@ function Room() {
                     {peersList.map((pid) => (
                         <div key={pid} className="participant-item">
                             <div className="participant-avatar" style={{ background: peerColor(pid) }}>
-                                {pid === socket.id ? "Y" : pid.slice(0, 1).toUpperCase()}
+                                {pid === socketRef.current?.id ? "Y" : pid.slice(0, 1).toUpperCase()}
                             </div>
                             <span className="participant-name">
-                                {pid === socket.id ? "You" : `Peer ${pid.slice(0, 6)}`}
+                                {pid === socketRef.current?.id ? "You" : `Peer ${pid.slice(0, 6)}`}
                             </span>
-                            {pid === socket.id && <span className="participant-you-tag">You</span>}
+                            {pid === socketRef.current?.id && <span className="participant-you-tag">You</span>}
                         </div>
                     ))}
                 </div>

@@ -1,0 +1,49 @@
+diff --cc Frontend/Live-calling/src/pages/Room.jsx
+index 8b2ac3c,ca4e7ee..0000000
+--- a/Frontend/Live-calling/src/pages/Room.jsx
++++ b/Frontend/Live-calling/src/pages/Room.jsx
+@@@ -371,32 -371,15 +378,44 @@@ function Room() 
+              });
+          });
+  
+++<<<<<<< HEAD
+ +        // ── Room closed by creator ──
+ +        // Fires for ALL participants (including the creator themselves via io.to)
+ +        socket.on("room-closed", ({ reason }) => {
+ +            setRoomEnded(true);
+ +            setToast({ msg: reason || "Meeting ended by host", hide: false });
+ +            // Clean up local media immediately
+ +            streamRef.current?.getTracks().forEach((t) => t.stop());
+ +            producersRef.current.forEach((p) => p.close());
+ +            consumersRef.current.forEach((c) => c.close());
+ +            sendTransportRef.current?.close();
+ +            recvTransportRef.current?.close();
+ +            setTimeout(() => navigate("/"), 2500);
+ +        });
+ +
+ +        init();
+ +
+ +        return () => {
+ +            socket.off("new-producer");
+ +            socket.off("new-peer");
+ +            socket.off("peer-left");
+ +            socket.off("producer-closed");
+ +            socket.off("new-message");
+ +            socket.off("peers-list");
+ +            socket.off("hand-raised");
+ +            socket.off("room-closed");
+ +
+++=======
++         // Wait for socket to connect before running the WebRTC init
++         if (sock.connected) {
++             init();
++         } else {
++             sock.once("connect", () => init());
++         }
++ 
++         return () => {
++             // Tear down all media
+++>>>>>>> 91c7856 (tab problem solved)
+              streamRef.current?.getTracks().forEach((t) => t.stop());
+              producersRef.current.forEach((p) => p.close());
+              consumersRef.current.forEach((c) => c.close());

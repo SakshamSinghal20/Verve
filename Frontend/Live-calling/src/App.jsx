@@ -1,19 +1,12 @@
-//  App.jsx — Landing page + socket setup
+//  App.jsx — Landing page
 //  Three distinct room flows: Instant Meeting, Custom Room, Join Existing
 
-import { io } from "socket.io-client";
 import "./App.css";
 import { useEffect, useState, useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
-
-// Shared socket — created once, exported for Room.jsx
-const token = localStorage.getItem("verve-token");
-export const socket = io(API_URL, {
-    auth: token ? { token } : {},
-});
 
 // ── SVG icons ───────────────────────────────────────────────
 const IconVideo = () => (
@@ -146,12 +139,7 @@ function App() {
     const handleJoinKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
     const handleCustomKeyDown = (e) => { if (e.key === "Enter") handleCustomCreate(); };
 
-    // ── Socket connection tracking ──────────────────────────
-    useEffect(() => {
-        socket.on("connect",    () => setConnected(true));
-        socket.on("disconnect", () => setConnected(false));
-        return () => { socket.off("connect"); socket.off("disconnect"); };
-    }, []);
+    // ── Socket connection tracking — not needed here (socket lives in Room.jsx) ──
 
     if (loading) {
         return (
