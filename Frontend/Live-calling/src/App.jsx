@@ -7,7 +7,7 @@ import { useEffect, useState, useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 
-const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5001";
+const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 // Shared socket — created once, exported for Room.jsx
 const token = localStorage.getItem("verve-token");
