@@ -500,11 +500,16 @@ io.on("connection", (socket) => {
             for (const [peerId, peer] of room.peers) {
                 if (peerId === socket.id) continue; // skip yourself — no point consuming your own stream
 
+                // Look up this peer's real identity from the usersInRoom registry
+                const identity = room.usersInRoom.get(peerId) || { userId: peerId, name: "Unknown" };
+
                 for (const [producerId, producer] of peer.producers) {
                     producers.push({
                         producerId,
                         peerId,
-                        kind: producer.kind, // "audio" or "video"
+                        userId: identity.userId, // ← real user identity (stable across reconnects)
+                        name:   identity.name,   // ← display name
+                        kind: producer.kind,     // "audio" or "video"
                         appData: producer.appData,
                     });
                 }
