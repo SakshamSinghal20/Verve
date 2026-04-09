@@ -5,15 +5,11 @@ const { authMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 
-// Regex: 3–32 chars, alphanumeric + hyphens only
 const ROOM_ID_REGEX = /^[a-zA-Z0-9-]{3,32}$/;
 
-// ── Instant Meeting ─────────────────────────────────────────────────────────
 // POST /api/rooms/instant
-// Auth required. Generates a guaranteed-unique short room ID.
 router.post("/instant", authMiddleware, async (req, res) => {
     try {
-        // Generate a short 8-char ID from UUID (collision-safe enough for this scale)
         const roomId = uuidv4().replace(/-/g, "").slice(0, 8);
 
         const room = await Room.findOneAndUpdate(
@@ -38,9 +34,7 @@ router.post("/instant", authMiddleware, async (req, res) => {
     }
 });
 
-// ── Create Custom Room ──────────────────────────────────────────────────────
 // POST /api/rooms
-// Auth required. User provides their own roomId.
 router.post("/", authMiddleware, async (req, res) => {
     try {
         const { roomId } = req.body;
@@ -57,7 +51,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Check if an active room with this ID already exists
         const existing = await Room.findOne({ roomId: trimmed, isActive: true });
         if (existing) {
             return res.status(409).json({ error: "Room ID already in use" });
@@ -80,7 +73,6 @@ router.post("/", authMiddleware, async (req, res) => {
             created: true,
         });
     } catch (err) {
-        // Handle MongoDB duplicate key race condition
         if (err.code === 11000) {
             return res.status(409).json({ error: "Room ID already in use" });
         }
@@ -89,10 +81,7 @@ router.post("/", authMiddleware, async (req, res) => {
     }
 });
 
-// ── Join Room ───────────────────────────────────────────────────────────────
 // POST /api/rooms/join
-// Auth required — only logged-in users can join or validate a room.
-// Validates the room exists and is active before the client navigates.
 router.post("/join", authMiddleware, async (req, res) => {
     try {
         const { roomId } = req.body;

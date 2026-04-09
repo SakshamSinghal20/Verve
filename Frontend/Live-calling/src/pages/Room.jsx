@@ -1,7 +1,3 @@
-//  Room.jsx — Video call screen
-//  All WebRTC / Mediasoup / Socket.IO logic is PRESERVED EXACTLY.
-//  Each tab creates its own isolated socket — tabs no longer share one connection.
-
 import React, { useEffect, useRef, useState, useCallback, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
@@ -9,7 +5,6 @@ import { createSocket } from "../socket";
 import * as mediasoupClient from "mediasoup-client";
 import "./Room.css";
 
-// ── Inline SVG icons (no icon library needed) ──────────────
 const IconMic = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -87,7 +82,6 @@ const IconSend = () => (
     </svg>
 );
 
-// ── Avatar color from peer ID ──────────────────────────────
 function peerColor(peerId) {
     const colors = ["#6366F1","#8B5CF6","#EC4899","#F59E0B","#10B981","#3B82F6","#EF4444"];
     let hash = 0;
@@ -95,7 +89,6 @@ function peerColor(peerId) {
     return colors[Math.abs(hash) % colors.length];
 }
 
-// ── RemoteVideo ────────────────────────────────────────────
 function RemoteVideo({ peerId, peerName, stream, handRaised }) {
     const videoRef = useRef(null);
 
@@ -125,12 +118,10 @@ function RemoteVideo({ peerId, peerName, stream, handRaised }) {
     );
 }
 
-// ── Room ───────────────────────────────────────────────────
 function Room() {
     const { roomId } = useParams();
     const navigate   = useNavigate();
 
-    // Auth context — provides current logged-in user
     const { user, loading: authLoading } = useContext(AuthContext);
 
     const socketRef         = useRef(null);
@@ -141,51 +132,39 @@ function Room() {
     const streamRef        = useRef(null);
     const producersRef     = useRef([]);
     const consumersRef     = useRef([]);
-    const producerToPeerRef = useRef({}); // Mapping: producerId -> { peerId, type }
+    const producerToPeerRef = useRef({});
     const initializedRef   = useRef(false);
 
-    // UI state
     const [status,        setStatus]        = useState("Connecting…");
     const [isMuted,       setIsMuted]       = useState(false);
     const [isCamOff,      setIsCamOff]      = useState(false);
     const [remoteStreams,  setRemoteStreams]  = useState({});
     const [peerCount,     setPeerCount]     = useState(0);
 
-    // Identity map: socketId → { userId, name } — single source of truth for all labels
+    // socketId → { userId, name } — single source of truth for all name labels
     const [peerInfo,      setPeerInfo]      = useState({});
-    // My own confirmed userId from the server's join-room callback
     const myUserIdRef = useRef(null);
 
-    // Chat
     const [chatOpen,     setChatOpen]     = useState(false);
     const [chatMessages, setChatMessages] = useState([]);
     const [chatInput,    setChatInput]    = useState("");
     const [unreadCount,  setUnreadCount]  = useState(0);
     const chatEndRef = useRef(null);
 
-    // Participants
     const [participantsOpen, setParticipantsOpen] = useState(false);
     const [peersList,        setPeersList]         = useState([]);
 
-    // Screen share
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [localScreenStream, setLocalScreenStream] = useState(null);
     const screenProducerRef = useRef(null);
 
-    // Raise hand
     const [raisedHands, setRaisedHands] = useState({});
     const raiseTimerRef = useRef(null);
 
-    // Toast
     const [toast, setToast] = useState(null);
-
-    // Creator flag
     const [isCreator, setIsCreator] = useState(false);
-
-    // Ended overlay (shown briefly before redirect)
     const [roomEnded, setRoomEnded] = useState(false);
 
-    // ── Helpers ─────────────────────────────────────────────
     function emitAsync(event, data = {}) {
         return new Promise((resolve, reject) => {
             socketRef.current.emit(event, data, (response) => {
@@ -206,7 +185,6 @@ function Room() {
         navigator.clipboard.writeText(url).then(() => showToast("Room link copied!"));
     }
 
-    // ── Consume a remote producer ────────────────────────────
     const consumeProducer = useCallback(async (producerId, peerId, kind, appData) => {
         try {
             const device = deviceRef.current;
@@ -227,14 +205,11 @@ function Room() {
                 rtpParameters: consumerData.rtpParameters,
             });
 
-            // Listen to track ending to re-render UI if someone stops video/screen
             consumer.track.onended = () => {
                  setRemoteStreams((prev) => ({ ...prev }));
             };
 
             consumersRef.current.push(consumer);
-
-            // Save mapping for cleanup later
             producerToPeerRef.current[producerId] = { peerId, type: (appData?.type === "screen" ? "screen" : "webcam") };
 
             setRemoteStreams((prev) => {
@@ -254,20 +229,16 @@ function Room() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // ── Auth guard — redirect unauthenticated users before any WebRTC work —
     useEffect(() => {
         if (authLoading) return;
         if (!user) navigate("/login", { replace: true });
     }, [user, authLoading, navigate]);
 
-    // ── Main init effect ────────────────────────────────────
     useEffect(() => {
-        // Don't start until auth has resolved and we have a confirmed user
         if (authLoading || !user) return;
         if (initializedRef.current) return;
         initializedRef.current = true;
 
-        // Create a fresh socket for THIS tab and connect it
         const sock = createSocket();
         socketRef.current = sock;
         sock.connect();
@@ -278,10 +249,8 @@ function Room() {
                 const { rtpCapabilities, isCreator: creator, myUserId, myName } = await emitAsync("join-room", roomId);
                 if (creator) setIsCreator(true);
 
-                // Store my confirmed userId — used for "You" label (stable across tabs)
                 myUserIdRef.current = myUserId;
 
-                // Register myself in peerInfo so the participants panel shows my name
                 const mySocketId = socketRef.current?.id;
                 if (mySocketId && myUserId && myName) {
                     setPeerInfo((prev) => ({ ...prev, [mySocketId]: { userId: myUserId, name: myName } }));
@@ -345,7 +314,6 @@ function Room() {
                 setStatus("live");
 
                 const { producers } = await emitAsync("get-producers");
-                // Populate peerInfo from the existing producers list
                 const infoFromProducers = {};
                 producers.forEach(({ peerId, userId, name }) => {
                     if (userId && name) infoFromProducers[peerId] = { userId, name };
@@ -371,9 +339,7 @@ function Room() {
             }
         }
 
-        // ── Socket listeners ─────────────────────────────────
         sock.on("new-producer", async ({ producerId, peerId, userId, name, kind, appData }) => {
-            // Always update peerInfo from new-producer identity — belt-and-suspenders
             if (peerId && userId && name) {
                 setPeerInfo((prev) => ({ ...prev, [peerId]: { userId, name } }));
             }
@@ -383,7 +349,6 @@ function Room() {
 
         sock.on("new-peer", ({ peerId, userId, name }) => {
             console.log("[Room] New peer:", name || peerId);
-            // Pre-fill identity before they start producing
             if (userId && name) {
                 setPeerInfo((prev) => ({ ...prev, [peerId]: { userId, name } }));
             }
@@ -411,10 +376,9 @@ function Room() {
                 setRemoteStreams((prev) => {
                     const streams = prev[peerId];
                     if (streams && streams[type]) {
-                        // Remove the specific track from the MediaStream objects
                         if (consumer) streams[type].removeTrack(consumer.track);
                     }
-                    return { ...prev }; // Trigger re-render
+                    return { ...prev };
                 });
                 delete producerToPeerRef.current[producerId];
             }
@@ -431,7 +395,6 @@ function Room() {
         });
 
         sock.on("peers-list", ({ peers }) => {
-            // peers is [{peerId, userId, name}] — always use server-provided name
             const infoMap = {};
             peers.forEach(({ peerId, userId, name }) => {
                 if (peerId && name) {
@@ -444,7 +407,7 @@ function Room() {
         });
 
         sock.on("hand-raised", ({ peerId, userId, raised }) => {
-            // Key raisedHands by userId so it works across multiple tabs of the same user
+            // Key by userId so it works across multiple tabs of the same user
             const key = userId || peerId;
             setRaisedHands((prev) => {
                 const updated = { ...prev };
@@ -454,12 +417,9 @@ function Room() {
             });
         });
 
-        // ── Room closed by creator ──
-        // Fires for ALL participants (including the creator themselves via io.to)
         sock.on("room-closed", ({ reason }) => {
             setRoomEnded(true);
             setToast({ msg: reason || "Meeting ended by host", hide: false });
-            // Clean up local media immediately
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
             consumersRef.current.forEach((c) => c.close());
@@ -468,14 +428,12 @@ function Room() {
             setTimeout(() => navigate("/"), 2500);
         });
 
-        // Wait for socket to connect before running the WebRTC init
         if (sock.connected) {
             init();
         } else {
             sock.once("connect", () => init());
         }
 
-        // Handle JWT auth failure mid-session (expired token)
         sock.on("connect_error", (err) => {
             if (err.message === "Authentication required" || err.message === "Invalid or expired token") {
                 navigate("/login", { replace: true });
@@ -483,19 +441,15 @@ function Room() {
         });
 
         return () => {
-            // Tear down all media
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
             consumersRef.current.forEach((c) => c.close());
             sendTransportRef.current?.close();
             recvTransportRef.current?.close();
-
-            // Disconnect THIS tab's socket — server fires disconnect only for this socket.id
             sock.disconnect();
         };
     }, [roomId, consumeProducer, user, authLoading]);
 
-    // ── Controls ─────────────────────────────────────────────
     function toggleMute() {
         streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
         setIsMuted((prev) => !prev);
@@ -518,9 +472,7 @@ function Room() {
     }
 
     function handleEndMeeting() {
-        // Emit end-room — server will broadcast room-closed to everyone
         socketRef.current.emit("end-room");
-        // Clean up creator's own resources; the room-closed listener will navigate
         streamRef.current?.getTracks().forEach((t) => t.stop());
         producersRef.current.forEach((p) => p.close());
         consumersRef.current.forEach((c) => c.close());
@@ -560,7 +512,7 @@ function Room() {
         }
     }
 
-    // My raise-hand state — keyed by userId so both tabs of same person reflect it
+    // Raise-hand state keyed by userId so both tabs of the same person reflect it
     const myUserId = myUserIdRef.current || user?.id;
     const myHandRaised = myUserId ? (raisedHands[myUserId] || false) : false;
 
@@ -595,7 +547,6 @@ function Room() {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
-    // Grid class
     const totalParticipants = 1 + Object.keys(remoteStreams).length + (localScreenStream ? 1 : 0) + Object.values(remoteStreams).filter(s => s.screen?.getVideoTracks().some(t => t.readyState === "live")).length;
     const gridClass =
         totalParticipants <= 1 ? "grid-1"
@@ -603,11 +554,9 @@ function Room() {
         : totalParticipants <= 4 ? "grid-4"
         : "grid-many";
 
-    // Status pill class
     const statusClass = status === "live" ? "live" : status === "error" ? "error" : "pending";
     const statusLabel = status === "live" ? "Live" : status === "error" ? "Connection failed" : status;
 
-    // Auth loading guard — show spinner while token is being verified
     if (authLoading) {
         return (
             <div className="room-container" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -618,7 +567,6 @@ function Room() {
 
     return (
         <div className="room-container">
-            {/* ── Header ── */}
             <header className="room-header">
                 <span className="room-logo">Verve</span>
 
@@ -641,9 +589,7 @@ function Room() {
                 </div>
             </header>
 
-            {/* ── Video stage ── */}
             <main className={`video-stage ${gridClass}`}>
-                {/* Local tile — always shows "You (Name)" so identity is unambiguous */}
                 <div className="video-card local">
                     <video
                         ref={localVideoRef}
@@ -661,7 +607,6 @@ function Room() {
                     {myHandRaised && <div className="hand-badge">✋</div>}
                 </div>
 
-                {/* Local Screen Share Tile */}
                 {localScreenStream && (
                     <div className="video-card local screen-share">
                         <video
@@ -672,14 +617,12 @@ function Room() {
                     </div>
                 )}
 
-                {/* Remote tiles — names resolved from peerInfo map */}
                 {Object.entries(remoteStreams).map(([peerId, streams]) => {
                     const info = peerInfo[peerId];
                     const resolvedName = info?.name || `Peer ${peerId.slice(0, 6)}`;
-                    // If this remote peer is the same user (different tab) — label them clearly
+                    // Label same user on a different tab clearly
                     const isSameUser = info?.userId && info.userId === myUserId;
                     const displayName = isSameUser ? `${resolvedName} (other tab)` : resolvedName;
-                    // Look up hand-raised by userId key
                     const handKey = info?.userId || peerId;
                     return (
                         <React.Fragment key={peerId}>
@@ -702,7 +645,6 @@ function Room() {
                 })}
             </main>
 
-            {/* ── Chat panel ── */}
             <div className={`chat-panel ${chatOpen ? "open" : ""}`}>
                 <div className="chat-header">
                     <span>Chat</span>
@@ -747,7 +689,6 @@ function Room() {
                 </div>
             </div>
 
-            {/* ── Participants panel ── */}
             <div className={`participants-panel ${participantsOpen ? "open" : ""}`}>
                 <div className="chat-header">
                     <span>People ({peersList.length})</span>
@@ -755,7 +696,6 @@ function Room() {
                 </div>
                 <div className="participants-list">
                     {peersList.map((peerEntry) => {
-                        // peersList items are now {peerId, userId, name} objects
                         const pid = peerEntry?.peerId || peerEntry;
                         const info = peerInfo[pid] || peerEntry;
                         const name = info?.name || `Peer ${String(pid).slice(0, 6)}`;
@@ -775,7 +715,6 @@ function Room() {
                 </div>
             </div>
 
-            {/* ── Controls ── */}
             <footer className="room-controls">
                 <button
                     className={`ctrl-btn ${isMuted ? "muted" : ""}`}
@@ -865,7 +804,6 @@ function Room() {
                 )}
             </footer>
 
-            {/* ── Room-ended overlay ── */}
             {roomEnded && (
                 <div className="room-ended-overlay">
                     <div className="room-ended-card">
@@ -877,7 +815,6 @@ function Room() {
                 </div>
             )}
 
-            {/* ── Toast ── */}
             {toast && (
                 <div className={`room-toast ${toast.hide ? "hide" : ""}`}>
                     ✓ {toast.msg}

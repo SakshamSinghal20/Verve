@@ -1,6 +1,3 @@
-//  App.jsx — Landing page
-//  Three distinct room flows: Instant Meeting, Custom Room, Join Existing
-
 import "./App.css";
 import { useEffect, useState, useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
@@ -8,7 +5,6 @@ import { useNavigate, Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
-// ── SVG icons ───────────────────────────────────────────────
 const IconVideo = () => (
     <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
@@ -60,21 +56,18 @@ function App() {
 
     const { user, loading, logout } = useContext(AuthContext);
 
-    // ── Helper: get auth header ─────────────────────────────
     function authHeaders() {
         const t = localStorage.getItem("verve-token");
         return t ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }
                  : { "Content-Type": "application/json" };
     }
 
-    // ── Toast helper ────────────────────────────────────────
     function showToast(msg, type = "success") {
         setToast({ msg, type, hide: false });
         setTimeout(() => setToast((t) => t ? { ...t, hide: true } : null), 2800);
         setTimeout(() => setToast(null), 3100);
     }
 
-    // ── 1) Instant Meeting ──────────────────────────────────
     async function handleInstant() {
         if (!user) { navigate("/login"); return; }
         setLoadingInstant(true);
@@ -93,7 +86,6 @@ function App() {
         }
     }
 
-    // ── 2) Create Custom Room ───────────────────────────────
     async function handleCustomCreate() {
         if (!user) { navigate("/login"); return; }
         const trimmed = customRoomId.trim().toLowerCase();
@@ -115,7 +107,6 @@ function App() {
         }
     }
 
-    // ── 3) Join Existing Room ───────────────────────────────
     async function handleJoin() {
         if (!user) { navigate("/login"); return; }
         const trimmed = roomId.trim().toLowerCase();
@@ -140,8 +131,6 @@ function App() {
     const handleJoinKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
     const handleCustomKeyDown = (e) => { if (e.key === "Enter") handleCustomCreate(); };
 
-    // ── Socket connection tracking — not needed here (socket lives in Room.jsx) ──
-
     if (loading) {
         return (
             <div className="landing-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
@@ -153,7 +142,6 @@ function App() {
     return (
         <div className="landing-container">
 
-            {/* Nav */}
             <nav className="landing-nav">
                 <span className="nav-logo">Verve</span>
                 {!user ? (
@@ -171,7 +159,6 @@ function App() {
                 )}
             </nav>
 
-            {/* Hero content */}
             <div className="landing-content">
                 <div className="hero-badge">
                     <span className="hero-badge-dot" />
@@ -188,7 +175,6 @@ function App() {
                     No downloads. Just share a link and start talking — crystal-clear calls that work everywhere.
                 </p>
 
-                {/* Action card */}
                 <div className="hero-card">
                     {user && (
                         <div className="user-badge" style={{ marginBottom: "1rem" }}>
@@ -197,7 +183,6 @@ function App() {
                         </div>
                     )}
 
-                    {/* ── Section 1: Instant Meeting ── */}
                     <button
                         className="btn-create"
                         onClick={handleInstant}
@@ -208,7 +193,6 @@ function App() {
                         {loadingInstant ? "Creating…" : "Start Instant Meeting"}
                     </button>
 
-                    {/* ── Section 2: Custom Room (collapsible) ── */}
                     <button
                         className="btn-custom-toggle"
                         onClick={() => setCustomOpen(!customOpen)}
@@ -241,7 +225,6 @@ function App() {
                         <p className="custom-hint">3–32 characters, letters, numbers, and hyphens only</p>
                     </div>
 
-                    {/* ── Section 3: Join Existing Room ── */}
                     <div className="divider">
                         <span>or join existing</span>
                     </div>
@@ -268,7 +251,6 @@ function App() {
                 </div>
             </div>
 
-            {/* Feature highlights */}
             <div className="features-row">
                 <div className="feature-card">
                     <span className="feature-icon"><IconLock /></span>
@@ -288,7 +270,6 @@ function App() {
                 </div>
             </div>
 
-            {/* Footer - connection indicator */}
             <div className="landing-footer">
                 <div className={`connection-indicator ${connected ? "online" : "offline"}`}>
                     <span className="dot" />
@@ -296,7 +277,6 @@ function App() {
                 </div>
             </div>
 
-            {/* Toast */}
             {toast && (
                 <div className={`toast ${toast.type === "error" ? "toast-error" : ""} ${toast.hide ? "hide" : ""}`}>
                     <span className="toast-icon">{toast.type === "error" ? "✕" : "✓"}</span>

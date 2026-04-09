@@ -1,49 +1,33 @@
-//  Verve – Main Server File
-//  Handles: HTTP API, Socket.IO signaling, Mediasoup WebRTC
-
-// Load environment variables from .env file into process.env
 require("dotenv").config();
 
-const mediasoup = require("mediasoup");   // WebRTC media server
-const express = require("express");     // HTTP framework
-const http = require("http");        // Node's built-in HTTP module
-const cors = require("cors");        // Cross-Origin Resource Sharing
-const mongoose = require("mongoose");    // MongoDB connection + models
-const { v4: uuidv4 } = require("uuid");  // Unique ID generator (available for future use)
-const authRoutes = require("./routes/auth");                       // REST routes: /api/auth/register, /api/auth/login
-const roomRoutes = require("./routes/rooms");                      // REST routes: /api/rooms/*
-const Room = require("./models/Room");                             // MongoDB Room model
-const { socketAuthMiddleware } = require("./middleware/auth");     // JWT check for socket connections
+const mediasoup = require("mediasoup");
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
+const mongoose = require("mongoose");
+const { v4: uuidv4 } = require("uuid");
+const authRoutes = require("./routes/auth");
+const roomRoutes = require("./routes/rooms");
+const Room = require("./models/Room");
+const { socketAuthMiddleware } = require("./middleware/auth");
 
-// ── Create the Express app and wrap it in a raw HTTP server
-// We need the raw HTTP server because Socket.IO needs to attach to it directly
 const app = express();
 const server = http.createServer(app);
 
-// ── Config from .env (with sensible defaults for local dev)
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173"; // where the React app runs
-const SERVER_IP = process.env.SERVER_IP || "127.0.0.1";             // IP that Mediasoup advertises to clients
-const PORT = process.env.PORT || 5000;                    // port this server listens on
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const SERVER_IP = process.env.SERVER_IP || "127.0.0.1";
+const PORT = process.env.PORT || 5000;
 
-// ── Express middleware
-app.use(cors({ origin: FRONTEND_URL }));  // only allow requests from our frontend URL
-app.use(express.json());                  // parse incoming JSON request bodies
+app.use(cors({ origin: FRONTEND_URL }));
+app.use(express.json());
 
-// Simple health-check route — visiting http://localhost:5000 confirms the server is up
 app.get("/", (req, res) => {
     res.send("Server is running");
 });
 
-// Mount auth REST routes under /api/auth
-// e.g. POST /api/auth/register, POST /api/auth/login
 app.use("/api/auth", authRoutes);
-
-// Mount room REST routes under /api/rooms
-// e.g. POST /api/rooms/instant, POST /api/rooms, POST /api/rooms/join
 app.use("/api/rooms", roomRoutes);
 
-// ── Socket.IO setup
-// Attach Socket.IO to the same HTTP server as Express so they share one port
 const { Server } = require("socket.io");
 const io = new Server(server, {
     cors: {
@@ -52,83 +36,57 @@ const io = new Server(server, {
     },
 });
 
-// Require a valid JWT token before any socket can connect
-// If no token is present, the socket is still allowed in as a guest (see middleware/auth.js)
 io.use(socketAuthMiddleware);
 
-// ── Mediasoup worker          
-// The worker is a low-level child process that handles all the actual media routing (RTP/RTCP)
 let worker;
 
 async function createWorker() {
     worker = await mediasoup.createWorker({
-        rtcMinPort: 20000,  // UDP port range for media packets — make sure firewall allows these
+        rtcMinPort: 20000,
         rtcMaxPort: 20200,
     });
     console.log("✅ Mediasoup Worker created");
 
-    // If the worker crashes for some reason, exit the whole server
-    // In production you'd want to restart the worker instead of exiting
     worker.on("died", () => {
         console.error("❌ Mediasoup worker died – exiting");
         process.exit(1);
     });
 }
 
-// ── Media codecs 
-// These are the audio/video formats the server supports.
-// Browsers negotiate which one to use during the WebRTC handshake.
 const mediaCodecs = [
     {
         kind: "audio",
-        mimeType: "audio/opus",  // Opus = high-quality, low-latency audio codec
-        clockRate: 48000,         // 48kHz sample rate
-        channels: 2,             // stereo
+        mimeType: "audio/opus",
+        clockRate: 48000,
+        channels: 2,
     },
     {
         kind: "video",
-        mimeType: "video/VP8",   // VP8 = widely supported WebRTC video codec
+        mimeType: "video/VP8",
         clockRate: 90000,
     },
 ];
 
-// ── In-memory room storage (Mediasoup state)
-// Mediasoup routers/transports/producers/consumers live here.
-// Room *metadata* (who created it, active status) lives in MongoDB.
-//
-// Structure:
-// rooms (Map)
-//  └─ roomId
-//      ├─ router      → Mediasoup Router (one per room, handles codec negotiation)
-//      ├─ chatHistory → Array of messages (capped at 200)
-//      ├─ creatorUserId → userId of the room creator (for multi-tab safe creator check)
-//      ├─ usersInRoom → Map: socketId → { userId, name }  (identity registry)
-//      └─ peers (Map)
-//          └─ socketId
-//              ├─ sendTransport → Transport for this peer's outgoing media
-//              ├─ recvTransport → Transport for this peer's incoming media
-//              ├─ producers     → Map of media tracks this peer is sending
-//              └─ consumers     → Map of media tracks this peer is receiving
+// rooms Map structure:
+// roomId → { router, chatHistory, creatorUserId, usersInRoom (Map: socketId → {userId, name}), peers (Map) }
+// peers: socketId → { sendTransport, recvTransport, producers (Map), consumers (Map) }
 const rooms = new Map();
 
-// Look up a peer inside a room, or create one with empty state if they're new
 function getOrCreatePeer(roomId, socketId) {
     const room = rooms.get(roomId);
-    if (!room) return null; // room doesn't exist yet
+    if (!room) return null;
 
     if (!room.peers.has(socketId)) {
-        // First time we're seeing this socket in this room — set up blank state
         room.peers.set(socketId, {
             sendTransport: null,
             recvTransport: null,
-            producers: new Map(), // tracks this peer is sending to the server
-            consumers: new Map(), // tracks this peer is receiving from the server
+            producers: new Map(),
+            consumers: new Map(),
         });
     }
     return room.peers.get(socketId);
 }
 
-// Build the full peers list with user identity for a room
 function buildPeersList(room) {
     return Array.from(room.peers.keys()).map((pid) => {
         const info = room.usersInRoom.get(pid) || { userId: pid, name: "Unknown" };
@@ -136,19 +94,15 @@ function buildPeersList(room) {
     });
 }
 
-// ── WebRTC Transport factory 
-// A "transport" is the tunnel between the server and a single client.
-// Every peer needs two: one for sending (upload) and one for receiving (download).
 async function createWebRtcTransport(router) {
     const transport = await router.createWebRtcTransport({
-        listenIps: [{ ip: "0.0.0.0", announcedIp: SERVER_IP }], // listen on all interfaces; tell the client to connect to SERVER_IP
-        enableUdp: true,    // UDP is preferred — lower latency
-        enableTcp: true,    // TCP as a fallback when UDP is blocked
+        listenIps: [{ ip: "0.0.0.0", announcedIp: SERVER_IP }],
+        enableUdp: true,
+        enableTcp: true,
         preferUdp: true,
-        initialAvailableOutgoingBitrate: 1000000, // start at ~1 Mbps, Mediasoup will adjust automatically
+        initialAvailableOutgoingBitrate: 1000000,
     });
 
-    // Clean up the transport object when the DTLS connection closes
     transport.on("dtlsstatechange", (dtlsState) => {
         if (dtlsState === "closed") {
             transport.close();
@@ -158,56 +112,42 @@ async function createWebRtcTransport(router) {
     return transport;
 }
 
-//  Socket.IO Events
-//  All real-time signaling between clients and server happens here.
 io.on("connection", (socket) => {
     console.log(`🔌 User connected: ${socket.id}`);
 
-    // We'll track which room this socket is in so we can look it up easily
     socket.roomId = null;
 
-    //   JOIN ROOM                                                          
-    //   Client calls this first when they navigate to a room URL.          
-    //   Server sets up the room if it doesn't exist and returns RTP        
-    //   capabilities (which the client needs to load its Mediasoup Device).
     socket.on("join-room", async (roomId, callback) => {
         try {
-            // Mediasoup must be ready before any room can be created
             if (!worker) {
                 return callback({ error: "Server not ready" });
             }
 
-            // Require authenticated user — socket middleware already verified the JWT
             if (!socket.user) {
                 return callback({ error: "Authentication required" });
             }
 
             const { id: userId, name } = socket.user;
 
-            // Add this socket to Socket.IO's room (for group broadcasting later)
             socket.join(roomId);
             socket.roomId = roomId;
 
-            // If this is the very first person joining, create the Mediasoup router
             if (!rooms.has(roomId)) {
                 const router = await worker.createRouter({ mediaCodecs });
                 rooms.set(roomId, {
                     router,
                     peers: new Map(),
-                    usersInRoom: new Map(), // socketId → { userId, name }
-                    chatHistory: [],         // starts empty
-                    creatorUserId: userId,   // creator identified by userId, not socketId
+                    usersInRoom: new Map(),
+                    chatHistory: [],
+                    creatorUserId: userId,
                 });
-                console.log(`📦 Room ${roomId} Mediasoup router created — creator: ${name} (${userId})`);
+                console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
             }
 
             const room = rooms.get(roomId);
-            getOrCreatePeer(roomId, socket.id); // register this peer in the room
-
-            // Register identity in usersInRoom map
+            getOrCreatePeer(roomId, socket.id);
             room.usersInRoom.set(socket.id, { userId, name });
 
-            // ── Sync with MongoDB: add this socket to participants ──
             try {
                 await Room.findOneAndUpdate(
                     { roomId },
@@ -216,27 +156,21 @@ io.on("connection", (socket) => {
                 );
             } catch (dbErr) {
                 console.error("MongoDB sync (join) error:", dbErr.message);
-                // Non-fatal — Mediasoup still works even if DB sync fails
             }
 
-            console.log(`✅ ${name} (${userId}) socket ${socket.id} joined room ${roomId} (${room.peers.size} peers)`);
+            console.log(`✅ ${name} (${userId}) joined room ${roomId} (${room.peers.size} peers)`);
 
-            // isCreator is now userId-based — works correctly across multiple tabs
+            // isCreator is userId-based so it works correctly across multiple tabs
             const isCreator = room.creatorUserId === userId;
 
-            // Return the router's RTP capabilities — the client uses this to load its Mediasoup Device
             callback({
                 rtpCapabilities: room.router.rtpCapabilities,
                 isCreator,
-                // Also tell this socket its own resolved identity
                 myUserId: userId,
                 myName: name,
             });
 
-            // Tell everyone else that a new person just joined — include real identity
             socket.to(roomId).emit("new-peer", { peerId: socket.id, userId, name });
-
-            // Send the full peers list with identity to everyone (including the new joiner)
             io.to(roomId).emit("peers-list", { peers: buildPeersList(room) });
         } catch (err) {
             console.error("join-room error:", err);
@@ -244,29 +178,22 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   END ROOM (Creator only)                                            
-    //   The creator can forcibly close the room for everyone.              
-    //   Broadcasts 'room-closed', destroys all Mediasoup state, and marks  
-    //   the room inactive in MongoDB.                                      
     socket.on("end-room", async () => {
         const currentRoomId = socket.roomId;
         if (!currentRoomId || !rooms.has(currentRoomId)) return;
 
         const room = rooms.get(currentRoomId);
 
-        // Creator check is now userId-based — works correctly even if creator has multiple tabs open
         const requestingUserId = socket.user?.id;
         if (room.creatorUserId !== requestingUserId) {
-            console.warn(`⚠️  Non-creator ${socket.id} (${requestingUserId}) attempted to end room ${currentRoomId}`);
+            console.warn(`⚠️  Non-creator ${socket.id} attempted to end room ${currentRoomId}`);
             return;
         }
 
         console.log(`🔚 Creator ${socket.id} ended room ${currentRoomId}`);
 
-        // Notify every participant that the room is closed
         io.to(currentRoomId).emit("room-closed", { reason: "Host ended the meeting" });
 
-        // Tear down all Mediasoup resources in the room
         for (const [, peer] of room.peers) {
             peer.producers.forEach((p) => p.close());
             peer.consumers.forEach((c) => c.close());
@@ -276,7 +203,6 @@ io.on("connection", (socket) => {
         room.router.close();
         rooms.delete(currentRoomId);
 
-        // Mark room inactive in MongoDB
         try {
             await Room.findOneAndUpdate(
                 { roomId: currentRoomId },
@@ -288,9 +214,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   CREATE SEND TRANSPORT                                              
-    //   Creates the "upload" pipe — for this client to send their camera   
-    //   and mic to the server. Returns ICE/DTLS params to the client.      
     socket.on("create-send-transport", async (_, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -298,11 +221,10 @@ io.on("connection", (socket) => {
 
             const transport = await createWebRtcTransport(room.router);
             const peer = getOrCreatePeer(socket.roomId, socket.id);
-            peer.sendTransport = transport; // save so we can use it when the client produces
+            peer.sendTransport = transport;
 
             console.log(`📤 Send transport created for ${socket.id}: ${transport.id}`);
 
-            // Send back the parameters the client needs to connect on its end
             callback({
                 id: transport.id,
                 iceParameters: transport.iceParameters,
@@ -315,9 +237,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   CREATE RECV TRANSPORT                                              
-    //   Creates the "download" pipe — for this client to receive other     
-    //   people's media from the server.                                    
     socket.on("create-recv-transport", async (_, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -325,7 +244,7 @@ io.on("connection", (socket) => {
 
             const transport = await createWebRtcTransport(room.router);
             const peer = getOrCreatePeer(socket.roomId, socket.id);
-            peer.recvTransport = transport; // save so we can create consumers on it later
+            peer.recvTransport = transport;
 
             console.log(`📥 Recv transport created for ${socket.id}: ${transport.id}`);
 
@@ -341,23 +260,17 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   CONNECT TRANSPORT                                                  
-    //   Finalizes the DTLS (encryption) handshake for either send or recv  
-    //   transport. The client sends its DTLS certificate fingerprint and   
-    //   the server uses it to establish a secure channel.                  
     socket.on("connect-transport", async ({ transportId, dtlsParameters }, callback) => {
         try {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
             if (!peer) return callback({ error: "Peer not found" });
 
-            // Figure out which transport (send or recv) this connection is for
             let transport = null;
             if (peer.sendTransport?.id === transportId) transport = peer.sendTransport;
             if (peer.recvTransport?.id === transportId) transport = peer.recvTransport;
 
             if (!transport) return callback({ error: "Transport not found" });
 
-            // Complete the DTLS handshake — after this, media can flow
             await transport.connect({ dtlsParameters });
             console.log(`🔗 Transport ${transportId} connected for ${socket.id}`);
             callback({ connected: true });
@@ -367,36 +280,26 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   PRODUCE                                                            
-    //   Client wants to send a media track (camera video or mic audio).   
-    //   Server creates a Producer and notifies all other peers so they     
-    //   can subscribe (consume) to it.                                     
     socket.on("produce", async ({ transportId, kind, rtpParameters, appData }, callback) => {
         try {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
 
-            // Make sure the send transport exists and matches
             if (!peer?.sendTransport || peer.sendTransport.id !== transportId) {
                 return callback({ error: "Send transport not found" });
             }
 
-            // Create the producer — this is the server-side representation of the client's track
             const producer = await peer.sendTransport.produce({ kind, rtpParameters, appData });
-            peer.producers.set(producer.id, producer); // save for later lookup
+            peer.producers.set(producer.id, producer);
 
             console.log(`🎬 Producer created for ${socket.id}: ${producer.id} (${kind})`);
 
-            // If the underlying transport closes, clean up the producer too
             producer.on("transportclose", () => {
                 producer.close();
                 peer.producers.delete(producer.id);
             });
 
-            // Tell the client what ID was assigned to this producer
             callback({ id: producer.id });
 
-            // Notify everyone else in the room so they can start consuming this stream
-            // Include user identity so the receiver can label the video tile correctly
             const room = rooms.get(socket.roomId);
             const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
             socket.to(socket.roomId).emit("new-producer", {
@@ -413,10 +316,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   CONSUME                                                            
-    //   Client wants to receive someone else's media stream.              
-    //   Server checks compatibility, creates a Consumer, and gives the     
-    //   client the parameters it needs to play the stream.                 
     socket.on("consume", async ({ producerId, rtpCapabilities }, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -425,28 +324,24 @@ io.on("connection", (socket) => {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
             if (!peer?.recvTransport) return callback({ error: "Recv transport not found" });
 
-            // Check that this client's device can actually decode the producer's codec
             if (!room.router.canConsume({ producerId, rtpCapabilities })) {
                 return callback({ error: "Cannot consume" });
             }
 
-            // Create the consumer — this is the server-side representation of the incoming stream
-            // We start it paused; the client will resume it once it's set up on its end
+            // Start paused — client calls resume-consumer after setup
             const consumer = await peer.recvTransport.consume({
                 producerId,
                 rtpCapabilities,
-                paused: true, // start paused — client calls resume-consumer after setup
+                paused: true,
             });
 
             peer.consumers.set(consumer.id, consumer);
 
-            // When the transport closes (e.g. disconnection), clean up the consumer
             consumer.on("transportclose", () => {
                 consumer.close();
                 peer.consumers.delete(consumer.id);
             });
 
-            // When the original sender stops their stream, tell this client about it
             consumer.on("producerclose", () => {
                 consumer.close();
                 peer.consumers.delete(consumer.id);
@@ -455,7 +350,6 @@ io.on("connection", (socket) => {
 
             console.log(`👁️ Consumer created for ${socket.id}: ${consumer.id} (${consumer.kind})`);
 
-            // Send back everything the client needs to receive and play the stream
             callback({
                 id: consumer.id,
                 producerId,
@@ -468,16 +362,13 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   RESUME CONSUMER                                                    
-    //   Tells the server to start flowing media for a consumer that was    
-    //   created in a paused state. Client calls this after it's ready.     
     socket.on("resume-consumer", async ({ consumerId }, callback) => {
         try {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
             const consumer = peer?.consumers.get(consumerId);
             if (!consumer) return callback({ error: "Consumer not found" });
 
-            await consumer.resume(); // actual media starts flowing now
+            await consumer.resume();
             console.log(`▶️ Consumer ${consumerId} resumed for ${socket.id}`);
             callback({ resumed: true });
         } catch (err) {
@@ -486,9 +377,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   GET PRODUCERS                                                      
-    //   Called by a newly joined peer to discover all streams that were    
-    //   already active in the room before they arrived.                    
     socket.on("get-producers", (_, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -496,20 +384,18 @@ io.on("connection", (socket) => {
 
             const producers = [];
 
-            // Loop through every peer and collect their producers
             for (const [peerId, peer] of room.peers) {
-                if (peerId === socket.id) continue; // skip yourself — no point consuming your own stream
+                if (peerId === socket.id) continue;
 
-                // Look up this peer's real identity from the usersInRoom registry
                 const identity = room.usersInRoom.get(peerId) || { userId: peerId, name: "Unknown" };
 
                 for (const [producerId, producer] of peer.producers) {
                     producers.push({
                         producerId,
                         peerId,
-                        userId: identity.userId, // ← real user identity (stable across reconnects)
-                        name:   identity.name,   // ← display name
-                        kind: producer.kind,     // "audio" or "video"
+                        userId: identity.userId,
+                        name: identity.name,
+                        kind: producer.kind,
                         appData: producer.appData,
                     });
                 }
@@ -522,8 +408,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   CHAT                                                               
-    //   Client sends a new chat message
     socket.on("send-message", ({ message }, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -532,22 +416,19 @@ io.on("connection", (socket) => {
             const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
 
             const chatMessage = {
-                peerId: socket.id,        // socket identity (for self-detection in UI)
-                userId: identity.userId,  // stable user identity across tabs
-                name: identity.name,      // display name
+                peerId: socket.id,
+                userId: identity.userId,
+                name: identity.name,
                 message,
                 timestamp: Date.now(),
             };
 
-            // Keep history in memory, capped at 200 so we don't use too much RAM
             room.chatHistory.push(chatMessage);
             if (room.chatHistory.length > 200) {
-                room.chatHistory = room.chatHistory.slice(-200); // keep only the last 200
+                room.chatHistory = room.chatHistory.slice(-200);
             }
 
-            // Broadcast to everyone in the room (including the sender so their UI confirms it)
             io.to(socket.roomId).emit("new-message", chatMessage);
-
             callback?.({ sent: true });
         } catch (err) {
             console.error("send-message error:", err);
@@ -555,7 +436,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    // Client requests chat history when they first join (so they don't miss earlier messages)
     socket.on("get-chat-history", (_, callback) => {
         try {
             const room = rooms.get(socket.roomId);
@@ -567,26 +447,18 @@ io.on("connection", (socket) => {
         }
     });
 
-    //   RAISE HAND                                                         
-    //   Simple broadcast — no server state needed.                         
-    //   Just relay the raised/lowered status to everyone in the room.      
     socket.on("raise-hand", ({ raised }) => {
         if (!socket.roomId) return;
         const room = rooms.get(socket.roomId);
         const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
-        // Forward to all peers in the room (including the sender)
         io.to(socket.roomId).emit("hand-raised", {
             peerId: socket.id,
             userId: identity.userId,
             name: identity.name,
-            raised,             // true = hand up, false = hand down
+            raised,
         });
     });
 
-    //   DISCONNECT                                                         
-    //   Fires automatically when a client closes the tab, loses internet, 
-    //   or clicks "Leave". Cleans up all their resources and notifies      
-    //   remaining peers.                                                    
     socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 
@@ -595,20 +467,16 @@ io.on("connection", (socket) => {
             const room = rooms.get(currentRoomId);
             const peer = room.peers.get(socket.id);
 
-            // ── If the disconnecting socket is the CREATOR (userId match), close the whole room ──
-            // We check userId not socketId so it works even if creator had multiple tabs
             const disconnectingUserId = socket.user?.id;
+            // Check userId (not socketId) so it works even if creator had multiple tabs open
             const isLastCreatorTab = room.creatorUserId === disconnectingUserId &&
-                // check no other tabs of the same userId remain in the room
                 Array.from(room.usersInRoom.values()).filter(u => u.userId === disconnectingUserId).length <= 1;
 
             if (isLastCreatorTab) {
                 console.log(`🔚 Creator ${socket.user?.name} (last tab) disconnected — closing room ${currentRoomId}`);
 
-                // Notify all remaining participants
                 socket.to(currentRoomId).emit("room-closed", { reason: "Host left the meeting" });
 
-                // Tear down every peer's media resources
                 for (const [, p] of room.peers) {
                     p.producers.forEach((prod) => prod.close());
                     p.consumers.forEach((cons) => cons.close());
@@ -627,42 +495,33 @@ io.on("connection", (socket) => {
                 } catch (dbErr) {
                     console.error("MongoDB sync (creator-disconnect) error:", dbErr.message);
                 }
-                return; // nothing more to do
+                return;
             }
 
             // Read identity BEFORE deleting — needed for the peer-left broadcast
             const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
 
             if (peer) {
-                // Close all media objects — this stops the RTP streams and frees memory
                 peer.producers.forEach((producer) => producer.close());
                 peer.consumers.forEach((consumer) => consumer.close());
                 peer.sendTransport?.close();
                 peer.recvTransport?.close();
-
-                // Remove this peer from the room
                 room.peers.delete(socket.id);
             }
 
-            // Tell the remaining peers that this person left — include userId so frontend can match
             socket.to(currentRoomId).emit("peer-left", {
                 peerId: socket.id,
                 userId: leftIdentity.userId,
             });
 
-            // Now remove from identity map (after emitting, so buildPeersList still had it)
             room.usersInRoom.delete(socket.id);
-
-            // Broadcast the updated list with identity so UI peer counts and names stay accurate
             io.to(currentRoomId).emit("peers-list", { peers: buildPeersList(room) });
 
-            // If the room is now empty, destroy it to free all resources
             if (room.peers.size === 0) {
-                room.router.close(); // close the Mediasoup router
+                room.router.close();
                 rooms.delete(currentRoomId);
                 console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
 
-                // ── Sync with MongoDB: mark room inactive ──
                 try {
                     await Room.findOneAndUpdate(
                         { roomId: currentRoomId },
@@ -673,7 +532,6 @@ io.on("connection", (socket) => {
                     console.error("MongoDB sync (delete) error:", dbErr.message);
                 }
             } else {
-                // ── Sync with MongoDB: remove this socket from participants ──
                 try {
                     await Room.findOneAndUpdate(
                         { roomId: currentRoomId },
@@ -687,33 +545,26 @@ io.on("connection", (socket) => {
     });
 });
 
-//  Server Startup
-//  Boot order matters: DB → Mediasoup → HTTP listener
 async function startServer() {
-    // Connect to MongoDB (only if MONGO_URI is set in .env)
     const MONGO_URI = process.env.MONGO_URI;
     if (MONGO_URI) {
         try {
             await mongoose.connect(MONGO_URI);
             console.log("✅ Connected to MongoDB");
         } catch (err) {
-            // Log the error but don't crash — the app can still run without auth features
             console.error("❌ MongoDB connection failed:", err.message);
         }
     } else {
         console.warn("⚠️  No MONGO_URI set — auth features disabled");
     }
 
-    // Start the Mediasoup worker (must be done before any rooms are created)
     await createWorker();
 
-    // Start listening for HTTP and Socket.IO connections
     server.listen(PORT, () => {
         console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
 }
 
-// Start everything — if anything throws during boot, log it and exit
 startServer().catch((err) => {
     console.error("Failed to start server:", err);
     process.exit(1);
