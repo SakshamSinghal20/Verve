@@ -168,6 +168,8 @@ io.on("connection", (socket) => {
                     creatorUserId: userId,
                     speakingTimes: {},   // userId → cumulative ms
                     statsInterval: null, // setInterval id for broadcasting stats
+                    timer: null,         // { durationMs, startedAt } when active
+                    timerTimeout: null,  // setTimeout id for auto-expiry
                 });
                 console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
             }
@@ -196,6 +198,7 @@ io.on("connection", (socket) => {
                 isCreator,
                 myUserId: userId,
                 myName: name,
+                timerState: room.timer || null,
             });
 
             socket.to(roomId).emit("new-peer", { peerId: socket.id, userId, name });
@@ -230,6 +233,7 @@ io.on("connection", (socket) => {
         }
         room.router.close();
         if (room.statsInterval) clearInterval(room.statsInterval);
+        if (room.timerTimeout) clearTimeout(room.timerTimeout);
         rooms.delete(currentRoomId);
 
         try {
@@ -545,6 +549,53 @@ io.on("connection", (socket) => {
         }
     });
 
+    // ── Shared Focus Timer ────────────────────────────────────────────────
+    socket.on("start-timer", ({ durationMs }) => {
+        if (!socket.roomId) return;
+        const room = rooms.get(socket.roomId);
+        if (!room) return;
+
+        // Only the creator can start a timer
+        if (room.creatorUserId !== socket.user?.id) return;
+
+        // Validate duration (1 min to 60 min)
+        if (typeof durationMs !== "number" || durationMs < 60000 || durationMs > 3600000) return;
+
+        // Clear any existing timer
+        if (room.timerTimeout) clearTimeout(room.timerTimeout);
+
+        const startedAt = Date.now();
+        room.timer = { durationMs, startedAt };
+
+        io.to(socket.roomId).emit("timer-sync", room.timer);
+
+        // Auto-expire when duration elapses
+        const rid = socket.roomId;
+        room.timerTimeout = setTimeout(() => {
+            const r = rooms.get(rid);
+            if (r) {
+                r.timer = null;
+                r.timerTimeout = null;
+            }
+            io.to(rid).emit("timer-ended");
+        }, durationMs);
+    });
+
+    socket.on("stop-timer", () => {
+        if (!socket.roomId) return;
+        const room = rooms.get(socket.roomId);
+        if (!room) return;
+
+        // Only the creator can stop
+        if (room.creatorUserId !== socket.user?.id) return;
+
+        if (room.timerTimeout) clearTimeout(room.timerTimeout);
+        room.timer = null;
+        room.timerTimeout = null;
+
+        io.to(socket.roomId).emit("timer-ended");
+    });
+
     socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 
@@ -571,6 +622,7 @@ io.on("connection", (socket) => {
                 }
                 room.router.close();
                 if (room.statsInterval) clearInterval(room.statsInterval);
+                if (room.timerTimeout) clearTimeout(room.timerTimeout);
                 rooms.delete(currentRoomId);
 
                 try {
@@ -607,6 +659,7 @@ io.on("connection", (socket) => {
             if (room.peers.size === 0) {
                 room.router.close();
                 if (room.statsInterval) clearInterval(room.statsInterval);
+                if (room.timerTimeout) clearTimeout(room.timerTimeout);
                 rooms.delete(currentRoomId);
                 console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
 

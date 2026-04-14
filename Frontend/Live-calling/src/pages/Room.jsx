@@ -231,6 +231,12 @@ function Room() {
     const [speakingStats, setSpeakingStats] = useState({}); // userId → { ms, name }
     const [statsOpen, setStatsOpen] = useState(false);
 
+    // ── Focus Timer state ───────────────────────────────────────────────
+    const [timerState, setTimerState]       = useState(null); // { durationMs, startedAt }
+    const [timerRemaining, setTimerRemaining] = useState(null); // seconds
+    const [timerPickerOpen, setTimerPickerOpen] = useState(false);
+    const timerIntervalRef = useRef(null);
+
     // pinnedInfo = { peerId, streamType: 'webcam' | 'screen' | 'local-screen' } | null
     const [pinnedInfo, setPinnedInfo] = useState(null);
 
@@ -326,8 +332,9 @@ function Room() {
         async function init() {
             try {
                 setStatus("Joining room…");
-                const { rtpCapabilities, isCreator: creator, myUserId, myName } = await emitAsync("join-room", roomId);
+                const { rtpCapabilities, isCreator: creator, myUserId, myName, timerState: ts } = await emitAsync("join-room", roomId);
                 if (creator) setIsCreator(true);
+                if (ts) setTimerState(ts); // sync timer for late joiners
 
                 myUserIdRef.current = myUserId;
 
@@ -517,6 +524,17 @@ function Room() {
             setSpeakingStats(stats || {});
         });
 
+        // ── Timer listeners ──────────────────────────────────────────
+        sock.on("timer-sync", (ts) => {
+            setTimerState(ts);
+        });
+
+        sock.on("timer-ended", () => {
+            setTimerState(null);
+            setToast({ msg: "Focus time complete! 🎉", hide: false });
+            setTimeout(() => setToast((prev) => prev ? { ...prev, hide: true } : null), 3000);
+        });
+
         sock.on("room-closed", ({ reason }) => {
             // Guard: if creator already navigated away via handleEndMeeting, skip
             if (!sock.connected) return;
@@ -550,6 +568,7 @@ function Room() {
             sendTransportRef.current?.close();
             recvTransportRef.current?.close();
             if (raiseTimerRef.current) clearTimeout(raiseTimerRef.current);
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             sock.disconnect();
         };
     }, [roomId, consumeProducer, user, authLoading]);
@@ -665,6 +684,50 @@ function Room() {
         return m > 0 ? `${m}m ${s}s` : `${s}s`;
     }
 
+    function startTimer(durationMs) {
+        socketRef.current?.emit("start-timer", { durationMs });
+        setTimerPickerOpen(false);
+    }
+
+    function stopTimer() {
+        socketRef.current?.emit("stop-timer");
+    }
+
+    function formatTimerDisplay(seconds) {
+        if (seconds == null || seconds < 0) return "00:00";
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // ── Timer countdown tick ────────────────────────────────────────────
+    useEffect(() => {
+        if (!timerState) {
+            setTimerRemaining(null);
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
+            }
+            return;
+        }
+
+        function tick() {
+            const elapsed = Date.now() - timerState.startedAt;
+            const remainMs = timerState.durationMs - elapsed;
+            setTimerRemaining(Math.max(0, Math.ceil(remainMs / 1000)));
+        }
+
+        tick(); // immediate first tick
+        timerIntervalRef.current = setInterval(tick, 1000);
+
+        return () => {
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
+            }
+        };
+    }, [timerState]);
+
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
@@ -764,6 +827,25 @@ function Room() {
                 </div>
             </header>
 
+            {/* ── Focus Timer bar ──────────────────────────────────── */}
+            {timerState && timerRemaining != null && (
+                <div className="timer-bar">
+                    <div
+                        className="timer-bar-progress"
+                        style={{
+                            width: `${Math.max(0, (timerRemaining / (timerState.durationMs / 1000)) * 100)}%`,
+                        }}
+                    />
+                    <div className="timer-bar-content">
+                        <span className="timer-bar-icon">⏱️</span>
+                        <span className="timer-bar-label">Focus Mode</span>
+                        <span className="timer-bar-time">{formatTimerDisplay(timerRemaining)}</span>
+                        {isCreator && (
+                            <button className="timer-stop-btn" onClick={stopTimer}>Stop</button>
+                        )}
+                    </div>
+                </div>
+            )}
             {pinnedInfo ? (() => {
                 // ── Pinned layout (true full-screen) ──────────────────────────
                 const { peerId: pinnedPeerId, streamType } = pinnedInfo;
@@ -1109,6 +1191,34 @@ function Room() {
                         </div>
                     )}
                 </div>
+
+                {isCreator && (
+                    <div className="reactions-wrapper">
+                        <button
+                            className={`ctrl-btn ${timerState ? "active" : ""}`}
+                            onClick={() => timerState ? stopTimer() : setTimerPickerOpen((p) => !p)}
+                            title={timerState ? "Stop timer" : "Start focus timer"}
+                            id="btn-focus-timer"
+                        >
+                            <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>⏱️</span>
+                            <span>{timerState ? "Stop" : "Focus"}</span>
+                        </button>
+                        {timerPickerOpen && !timerState && (
+                            <div className="timer-picker">
+                                <div className="timer-picker-title">Focus Timer</div>
+                                {[5, 15, 25, 45].map((min) => (
+                                    <button
+                                        key={min}
+                                        className="timer-preset-btn"
+                                        onClick={() => startTimer(min * 60 * 1000)}
+                                    >
+                                        {min} min
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="controls-divider" />
 
