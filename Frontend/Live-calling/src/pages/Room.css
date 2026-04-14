@@ -2,10 +2,17 @@
 /* Uses hardcoded hex values for reliable cross-browser rendering */
 
 /* ── Layout ──────────────────────────────────────────────── */
+/* Force dark background on body/root when room is active to prevent white bleed */
+body:has(.room-container),
+body:has(.room-container) #root {
+  background-color: #000;
+}
+
 .room-container {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
   background: #000;
   color: #e0e0e0;
@@ -148,7 +155,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+  box-shadow: none;
 }
 
 .video-stage.grid-1 .video-card { border-radius: 0; }
