@@ -193,14 +193,15 @@ function Room() {
     const [isCreator, setIsCreator] = useState(false);
     const [roomEnded, setRoomEnded] = useState(false);
 
-    const [pinnedUserId, setPinnedUserId] = useState(null);
+    // pinnedInfo = { peerId, streamType: 'webcam' | 'screen' | 'local-screen' } | null
+    const [pinnedInfo, setPinnedInfo] = useState(null);
 
-    const handlePin = useCallback((peerId) => {
-        setPinnedUserId(peerId);
+    const handlePin = useCallback((peerId, streamType = 'webcam') => {
+        setPinnedInfo({ peerId, streamType });
     }, []);
 
     const handleUnpin = useCallback(() => {
-        setPinnedUserId(null);
+        setPinnedInfo(null);
     }, []);
 
     function emitAsync(event, data = {}) {
@@ -397,7 +398,7 @@ function Room() {
             setPeerInfo((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
             setPeerCount((prev) => Math.max(0, prev - 1));
             // Auto-unpin if the pinned user leaves
-            setPinnedUserId((prev) => prev === peerId ? null : prev);
+            setPinnedInfo((prev) => prev?.peerId === peerId ? null : prev);
         });
 
         sock.on("producer-closed", ({ producerId }) => {
@@ -420,6 +421,10 @@ function Room() {
                     }
                     return { ...prev };
                 });
+                // Auto-unpin if the pinned screen share producer closes
+                setPinnedInfo((prev) =>
+                    prev?.peerId === peerId && prev?.streamType === type ? null : prev
+                );
                 delete producerToPeerRef.current[producerId];
             }
 
@@ -546,6 +551,8 @@ function Room() {
                 screenProducerRef.current = null;
                 setLocalScreenStream(null);
                 setIsScreenSharing(false);
+                // Auto-unpin if local screen was pinned
+                setPinnedInfo((prev) => prev?.streamType === 'local-screen' ? null : prev);
             };
         } catch (err) {
             if (err.name !== "NotAllowedError") console.error("[Room] Screen share error:", err);
@@ -590,11 +597,11 @@ function Room() {
     // Escape key to unpin
     useEffect(() => {
         function onKeyDown(e) {
-            if (e.key === "Escape" && pinnedUserId) handleUnpin();
+            if (e.key === "Escape" && pinnedInfo) handleUnpin();
         }
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, [pinnedUserId, handleUnpin]);
+    }, [pinnedInfo, handleUnpin]);
 
     const totalParticipants = 1 + Object.keys(remoteStreams).length + (localScreenStream ? 1 : 0) + Object.values(remoteStreams).filter(s => s.screen?.getVideoTracks().some(t => t.readyState === "live")).length;
     const gridClass =
@@ -638,25 +645,48 @@ function Room() {
                 </div>
             </header>
 
-            {pinnedUserId ? (() => {
+            {pinnedInfo ? (() => {
                 // ── Pinned layout (true full-screen) ──────────────────────────
-                const pinnedStreams  = remoteStreams[pinnedUserId];
-                const pinnedInfo    = peerInfo[pinnedUserId];
-                const pinnedName    = pinnedInfo?.name || `Peer ${pinnedUserId.slice(0, 6)}`;
-                const pinnedHandKey = pinnedInfo?.userId || pinnedUserId;
+                const { peerId: pinnedPeerId, streamType } = pinnedInfo;
+
+                // Resolve the correct stream and display name based on streamType
+                let pinnedStream, pinnedName, pinnedHandKey;
+                if (streamType === 'local-screen') {
+                    pinnedStream  = localScreenStream;
+                    pinnedName    = `Your Screen`;
+                    pinnedHandKey = null;
+                } else {
+                    const peerStreams = remoteStreams[pinnedPeerId];
+                    pinnedStream     = streamType === 'screen' ? peerStreams?.screen : peerStreams?.webcam;
+                    const info       = peerInfo[pinnedPeerId];
+                    pinnedHandKey    = info?.userId || pinnedPeerId;
+                    const baseName   = info?.name || `Peer ${pinnedPeerId.slice(0, 6)}`;
+                    pinnedName       = streamType === 'screen' ? `${baseName}'s Screen` : baseName;
+                }
 
                 return (
                     <main className="video-stage pinned-layout">
                         <div className="pinned-main">
-                            <RemoteVideo
-                                peerId={pinnedUserId}
-                                peerName={pinnedName}
-                                stream={pinnedStreams?.webcam}
-                                handRaised={!!raisedHands[pinnedHandKey]}
-                                isPinned
-                                onPin={handlePin}
-                                onUnpin={handleUnpin}
-                            />
+                            {streamType === 'local-screen' ? (
+                                // Local screen — render a plain video element (no RemoteVideo)
+                                <div className="video-card pinned-card">
+                                    <video
+                                        ref={(el) => { if (el) el.srcObject = localScreenStream; }}
+                                        autoPlay playsInline muted
+                                    />
+                                    <div className="video-label">Your Screen</div>
+                                </div>
+                            ) : (
+                                <RemoteVideo
+                                    peerId={pinnedPeerId}
+                                    peerName={pinnedName}
+                                    stream={pinnedStream}
+                                    handRaised={!!raisedHands[pinnedHandKey]}
+                                    isPinned
+                                    onPin={handlePin}
+                                    onUnpin={handleUnpin}
+                                />
+                            )}
                             <div className="pinned-banner">
                                 <IconPin filled />
                                 <span>{pinnedName} — Pinned</span>
@@ -692,6 +722,16 @@ function Room() {
                                 autoPlay playsInline muted
                             />
                             <div className="video-label">Your Screen</div>
+                            {/* Pin button on local screen share */}
+                            <button
+                                className="pin-btn"
+                                onClick={() => handlePin('local-screen', 'local-screen')}
+                                title="Pin to full screen"
+                                aria-label="Pin your screen share"
+                            >
+                                <IconPin />
+                                <span>Pin</span>
+                            </button>
                         </div>
                     )}
 
@@ -708,18 +748,18 @@ function Room() {
                                     peerName={displayName}
                                     stream={streams.webcam}
                                     handRaised={!!raisedHands[handKey]}
-                                    isPinned={false}
-                                    onPin={handlePin}
+                                    isPinned={pinnedInfo?.peerId === peerId && pinnedInfo?.streamType === 'webcam'}
+                                    onPin={(pid) => handlePin(pid, 'webcam')}
                                     onUnpin={handleUnpin}
                                 />
                                 {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
                                     <RemoteVideo
-                                        peerId={`${peerId}-screen`}
+                                        peerId={peerId}
                                         peerName={`${displayName}'s Screen`}
                                         stream={streams.screen}
                                         handRaised={false}
-                                        isPinned={false}
-                                        onPin={handlePin}
+                                        isPinned={pinnedInfo?.peerId === peerId && pinnedInfo?.streamType === 'screen'}
+                                        onPin={(pid) => handlePin(pid, 'screen')}
                                         onUnpin={handleUnpin}
                                     />
                                 )}
