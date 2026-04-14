@@ -167,7 +167,6 @@ function Room() {
     const [isMuted,       setIsMuted]       = useState(false);
     const [isCamOff,      setIsCamOff]      = useState(false);
     const [remoteStreams,  setRemoteStreams]  = useState({});
-    const [peerCount,     setPeerCount]     = useState(0);
 
     // socketId → { userId, name } — single source of truth for all name labels
     const [peerInfo,      setPeerInfo]      = useState({});
@@ -364,7 +363,7 @@ function Room() {
                 if (Object.keys(infoFromProducers).length) {
                     setPeerInfo((prev) => ({ ...prev, ...infoFromProducers }));
                 }
-                setPeerCount(new Set(producers.map((p) => p.peerId)).size);
+
                 for (const { producerId, peerId, kind, appData } of producers) {
                     await consumeProducer(producerId, peerId, kind, appData);
                 }
@@ -386,7 +385,6 @@ function Room() {
             if (peerId && userId && name) {
                 setPeerInfo((prev) => ({ ...prev, [peerId]: { userId, name } }));
             }
-            setPeerCount((prev) => prev + (kind === "video" && (!appData || appData.type !== "screen") ? 1 : 0));
             await consumeProducer(producerId, peerId, kind, appData);
         });
 
@@ -400,7 +398,7 @@ function Room() {
         sock.on("peer-left", ({ peerId }) => {
             setRemoteStreams((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
             setPeerInfo((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
-            setPeerCount((prev) => Math.max(0, prev - 1));
+
             // Auto-unpin if the pinned user leaves
             setPinnedInfo((prev) => prev?.peerId === peerId ? null : prev);
         });
@@ -452,7 +450,7 @@ function Room() {
             });
             setPeerInfo((prev) => ({ ...prev, ...infoMap }));
             setPeersList(peers);
-            setPeerCount(peers.length);
+
         });
 
         sock.on("hand-raised", ({ peerId, userId, raised }) => {
@@ -493,8 +491,10 @@ function Room() {
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
             consumersRef.current.forEach((c) => c.close());
+            screenProducerRef.current?.close();
             sendTransportRef.current?.close();
             recvTransportRef.current?.close();
+            if (raiseTimerRef.current) clearTimeout(raiseTimerRef.current);
             sock.disconnect();
         };
     }, [roomId, consumeProducer, user, authLoading]);

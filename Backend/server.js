@@ -177,7 +177,7 @@ io.on("connection", (socket) => {
             try {
                 await Room.findOneAndUpdate(
                     { roomId },
-                    { $addToSet: { participants: socket.id }, isActive: true },
+                    { $addToSet: { participants: userId }, isActive: true },
                     { upsert: false }
                 );
             } catch (dbErr) {
@@ -561,7 +561,7 @@ io.on("connection", (socket) => {
                 try {
                     await Room.findOneAndUpdate(
                         { roomId: currentRoomId },
-                        { $pull: { participants: socket.id } }
+                        { $pull: { participants: disconnectingUserId } }
                     );
                 } catch (dbErr) {
                     console.error("MongoDB sync (leave) error:", dbErr.message);
