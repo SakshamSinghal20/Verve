@@ -485,6 +485,30 @@ io.on("connection", (socket) => {
         });
     });
 
+    // ── Live Reactions ──────────────────────────────────────────────────────
+    const VALID_REACTIONS = new Set(["confetti", "clap", "laugh", "heart", "fire", "thumbsup"]);
+
+    socket.on("send-reaction", ({ type }) => {
+        if (!socket.roomId || !VALID_REACTIONS.has(type)) return;
+        const room = rooms.get(socket.roomId);
+        if (!room) return;
+
+        const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+
+        // Rate limit: max 1 reaction per second per socket
+        const now = Date.now();
+        if (socket._lastReaction && now - socket._lastReaction < 1000) return;
+        socket._lastReaction = now;
+
+        io.to(socket.roomId).emit("reaction", {
+            type,
+            peerId: socket.id,
+            userId: identity.userId,
+            name: identity.name,
+            timestamp: now,
+        });
+    });
+
     socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 

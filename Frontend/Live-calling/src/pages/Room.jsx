@@ -89,6 +89,37 @@ const IconSend = () => (
     </svg>
 );
 
+const REACTION_EMOJIS = {
+    confetti: "🎉",
+    clap:     "👏",
+    laugh:    "😂",
+    heart:    "❤️",
+    fire:     "🔥",
+    thumbsup: "👍",
+};
+
+// Plays a short chime via Web Audio API — no audio files needed
+function playReactionChime(type) {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const freqs = { confetti: 880, clap: 660, laugh: 784, heart: 523, fire: 740, thumbsup: 600 };
+        osc.frequency.value = freqs[type] || 660;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.25);
+        setTimeout(() => ctx.close(), 400);
+    } catch { /* ignore audio errors silently */ }
+}
+
+let _reactionIdCounter = 0;
+
 function peerColor(peerId) {
     const colors = ["#6366F1","#8B5CF6","#EC4899","#F59E0B","#10B981","#3B82F6","#EF4444"];
     let hash = 0;
@@ -191,6 +222,10 @@ function Room() {
     const [toast, setToast] = useState(null);
     const [isCreator, setIsCreator] = useState(false);
     const [roomEnded, setRoomEnded] = useState(false);
+
+    // ── Reactions state ─────────────────────────────────────────────────
+    const [reactions, setReactions]       = useState([]);   // active floating reactions
+    const [reactionsOpen, setReactionsOpen] = useState(false);
 
     // pinnedInfo = { peerId, streamType: 'webcam' | 'screen' | 'local-screen' } | null
     const [pinnedInfo, setPinnedInfo] = useState(null);
@@ -463,6 +498,16 @@ function Room() {
             });
         });
 
+        // ── Reactions listener ─────────────────────────────────────────
+        sock.on("reaction", ({ type, name, userId }) => {
+            const id = ++_reactionIdCounter;
+            const left = 10 + Math.random() * 80; // random horizontal position %
+            setReactions((prev) => [...prev, { id, type, name, left }]);
+            playReactionChime(type);
+            // Auto-remove after animation completes
+            setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 3000);
+        });
+
         sock.on("room-closed", ({ reason }) => {
             // Guard: if creator already navigated away via handleEndMeeting, skip
             if (!sock.connected) return;
@@ -575,6 +620,11 @@ function Room() {
         if (newState) {
             raiseTimerRef.current = setTimeout(() => socketRef.current?.emit("raise-hand", { raised: false }), 30000);
         }
+    }
+
+    function sendReaction(type) {
+        socketRef.current?.emit("send-reaction", { type });
+        setReactionsOpen(false);
     }
 
     function handleSendMessage() {
@@ -908,6 +958,32 @@ function Room() {
                     <span>{myHandRaised ? "Lower" : "Raise"}</span>
                 </button>
 
+                <div className="reactions-wrapper">
+                    <button
+                        className={`ctrl-btn ${reactionsOpen ? "active" : ""}`}
+                        onClick={() => setReactionsOpen((p) => !p)}
+                        title="Reactions"
+                        id="btn-reactions"
+                    >
+                        <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>🎉</span>
+                        <span>React</span>
+                    </button>
+                    {reactionsOpen && (
+                        <div className="reactions-picker">
+                            {Object.entries(REACTION_EMOJIS).map(([key, emoji]) => (
+                                <button
+                                    key={key}
+                                    className="reaction-btn"
+                                    onClick={() => sendReaction(key)}
+                                    title={key}
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <div className="controls-divider" />
 
                 {isCreator ? (
@@ -943,6 +1019,20 @@ function Room() {
                     </div>
                 </div>
             )}
+
+            {/* ── Floating reactions overlay ─────────────────────────── */}
+            <div className="reactions-overlay" aria-hidden="true">
+                {reactions.map((r) => (
+                    <div
+                        key={r.id}
+                        className="reaction-float"
+                        style={{ left: `${r.left}%` }}
+                    >
+                        <span className="reaction-float-emoji">{REACTION_EMOJIS[r.type]}</span>
+                        <span className="reaction-float-name">{r.name}</span>
+                    </div>
+                ))}
+            </div>
 
             {toast && (
                 <div className={`room-toast ${toast.hide ? "hide" : ""}`}>
