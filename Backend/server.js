@@ -166,6 +166,8 @@ io.on("connection", (socket) => {
                     usersInRoom: new Map(),
                     chatHistory: [],
                     creatorUserId: userId,
+                    speakingTimes: {},   // userId → cumulative ms
+                    statsInterval: null, // setInterval id for broadcasting stats
                 });
                 console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
             }
@@ -227,6 +229,7 @@ io.on("connection", (socket) => {
             peer.recvTransport?.close();
         }
         room.router.close();
+        if (room.statsInterval) clearInterval(room.statsInterval);
         rooms.delete(currentRoomId);
 
         try {
@@ -509,6 +512,39 @@ io.on("connection", (socket) => {
         });
     });
 
+    // ── Speaking Time Tracker ────────────────────────────────────────────────
+    socket.on("speaking-update", ({ durationMs }) => {
+        if (!socket.roomId) return;
+        const room = rooms.get(socket.roomId);
+        if (!room) return;
+
+        const userId = socket.user?.id;
+        if (!userId || typeof durationMs !== "number" || durationMs < 0) return;
+
+        // Accumulate speaking time (cap at 10s per update to prevent abuse)
+        room.speakingTimes[userId] = (room.speakingTimes[userId] || 0) + Math.min(durationMs, 10000);
+
+        // Start broadcasting stats interval if not already running
+        if (!room.statsInterval) {
+            const rid = socket.roomId;
+            room.statsInterval = setInterval(() => {
+                const r = rooms.get(rid);
+                if (!r) return;
+                // Build stats with names
+                const stats = {};
+                for (const [uid, ms] of Object.entries(r.speakingTimes)) {
+                    // Find name for this userId
+                    let name = "Unknown";
+                    for (const [, info] of r.usersInRoom) {
+                        if (info.userId === uid) { name = info.name; break; }
+                    }
+                    stats[uid] = { ms, name };
+                }
+                io.to(rid).emit("speaking-stats", { stats });
+            }, 5000);
+        }
+    });
+
     socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 
@@ -534,6 +570,7 @@ io.on("connection", (socket) => {
                     p.recvTransport?.close();
                 }
                 room.router.close();
+                if (room.statsInterval) clearInterval(room.statsInterval);
                 rooms.delete(currentRoomId);
 
                 try {
@@ -569,6 +606,7 @@ io.on("connection", (socket) => {
 
             if (room.peers.size === 0) {
                 room.router.close();
+                if (room.statsInterval) clearInterval(room.statsInterval);
                 rooms.delete(currentRoomId);
                 console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
 

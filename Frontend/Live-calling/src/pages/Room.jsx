@@ -227,6 +227,10 @@ function Room() {
     const [reactions, setReactions]       = useState([]);   // active floating reactions
     const [reactionsOpen, setReactionsOpen] = useState(false);
 
+    // ── Speaking stats state ──────────────────────────────────────────────
+    const [speakingStats, setSpeakingStats] = useState({}); // userId → { ms, name }
+    const [statsOpen, setStatsOpen] = useState(false);
+
     // pinnedInfo = { peerId, streamType: 'webcam' | 'screen' | 'local-screen' } | null
     const [pinnedInfo, setPinnedInfo] = useState(null);
 
@@ -508,6 +512,11 @@ function Room() {
             setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 3000);
         });
 
+        // ── Speaking stats listener ────────────────────────────────────
+        sock.on("speaking-stats", ({ stats }) => {
+            setSpeakingStats(stats || {});
+        });
+
         sock.on("room-closed", ({ reason }) => {
             // Guard: if creator already navigated away via handleEndMeeting, skip
             if (!sock.connected) return;
@@ -645,9 +654,64 @@ function Room() {
         });
     }
 
+    function toggleStats() {
+        setStatsOpen((prev) => !prev);
+    }
+
+    function formatSpeakingTime(ms) {
+        const totalSec = Math.floor(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    }
+
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
+
+    // ── Voice Activity Detection for speaking stats ─────────────────
+    useEffect(() => {
+        const stream = streamRef.current;
+        if (!stream || !socketRef.current) return;
+
+        const audioTrack = stream.getAudioTracks()[0];
+        if (!audioTrack) return;
+
+        let ctx;
+        try {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch { return; }
+
+        const source = ctx.createMediaStreamSource(new MediaStream([audioTrack]));
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        let speakingMs = 0;
+        const THRESHOLD = 30; // volume level to count as "speaking"
+        const POLL_MS = 200;
+        const SEND_INTERVAL_MS = 3000;
+
+        const pollId = setInterval(() => {
+            analyser.getByteFrequencyData(data);
+            const avg = data.reduce((a, b) => a + b, 0) / data.length;
+            if (avg > THRESHOLD) speakingMs += POLL_MS;
+        }, POLL_MS);
+
+        const sendId = setInterval(() => {
+            if (speakingMs > 0 && socketRef.current?.connected) {
+                socketRef.current.emit("speaking-update", { durationMs: speakingMs });
+                speakingMs = 0;
+            }
+        }, SEND_INTERVAL_MS);
+
+        return () => {
+            clearInterval(pollId);
+            clearInterval(sendId);
+            ctx.close().catch(() => {});
+        };
+    }, [status]); // re-run when stream becomes active (status changes to "live")
 
     // Escape key to unpin
     useEffect(() => {
@@ -894,6 +958,58 @@ function Room() {
                 </div>
             </div>
 
+            {/* ── Speaking Stats panel ──────────────────────────────── */}
+            <div className={`stats-panel ${statsOpen ? "open" : ""}`}>
+                <div className="chat-header">
+                    <span>📊 Speaking Stats</span>
+                    <button className="chat-close" onClick={toggleStats}>×</button>
+                </div>
+                <div className="stats-list">
+                    {(() => {
+                        const entries = Object.entries(speakingStats);
+                        if (entries.length === 0) {
+                            return <p className="chat-empty">No speaking data yet.<br/>Start talking to see stats!</p>;
+                        }
+                        const maxMs = Math.max(...entries.map(([, v]) => v.ms), 1);
+                        return entries
+                            .sort((a, b) => b[1].ms - a[1].ms)
+                            .map(([uid, { ms, name }]) => {
+                                const pct = Math.round((ms / maxMs) * 100);
+                                const isMe = uid === myUserId;
+                                return (
+                                    <div key={uid} className="stats-row">
+                                        <div className="stats-label">
+                                            <span className="stats-name">{isMe ? `${name} (You)` : name}</span>
+                                            <span className="stats-time">{formatSpeakingTime(ms)}</span>
+                                        </div>
+                                        <div className="stats-bar">
+                                            <div
+                                                className={`stats-bar-fill ${isMe ? "stats-bar-me" : ""}`}
+                                                style={{ width: `${pct}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            });
+                    })()}
+                    {/* Show peers who haven't spoken */}
+                    {peersList.filter(p => !speakingStats[(p.userId || p.peerId)])?.map(p => {
+                        const nm = p.name || peerInfo[p.peerId]?.name || "Unknown";
+                        return (
+                            <div key={p.peerId} className="stats-row">
+                                <div className="stats-label">
+                                    <span className="stats-name stats-quiet">{nm}</span>
+                                    <span className="stats-time stats-quiet">Hasn’t spoken</span>
+                                </div>
+                                <div className="stats-bar">
+                                    <div className="stats-bar-fill" style={{ width: '0%' }} />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
             <footer className="room-controls">
                 <button
                     className={`ctrl-btn ${isMuted ? "muted" : ""}`}
@@ -946,6 +1062,16 @@ function Room() {
                 >
                     <IconUsers />
                     <span>People</span>
+                </button>
+
+                <button
+                    className={`ctrl-btn ${statsOpen ? "active" : ""}`}
+                    onClick={toggleStats}
+                    title="Speaking Stats"
+                    id="btn-toggle-stats"
+                >
+                    <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>📊</span>
+                    <span>Stats</span>
                 </button>
 
                 <button
