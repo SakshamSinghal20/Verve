@@ -711,3 +711,153 @@
 @media (max-width: 400px) {
   .ctrl-btn span { display: none; }
 }
+
+/* ── Pin button (shows on hover over a video tile) ───────────── */
+.pin-btn {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.6rem;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  color: rgba(255,255,255,0.7);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  z-index: 4;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.pin-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* Reveal pin button on tile hover */
+.video-card:hover .pin-btn {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pin-btn:hover {
+  background: rgba(99,102,241,0.75);
+  border-color: #6366F1;
+  color: #fff;
+}
+
+/* Active / pinned state */
+.pin-btn--active {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  background: rgba(99,102,241,0.85);
+  border-color: #818CF8;
+  color: #fff;
+}
+
+.pin-btn--active:hover {
+  background: rgba(239,68,68,0.75);
+  border-color: #EF4444;
+}
+
+/* ── Pinned card (the large tile) ────────────────────────────── */
+.pinned-card {
+  box-shadow:
+    0 0 0 2px #6366F1,
+    0 0 32px rgba(99,102,241,0.35);
+}
+
+/* ── Thumbnail card (small tiles in strip) ───────────────────── */
+.thumbnail-card {
+  border-radius: 8px;
+  width: 160px;
+  height: 100%;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.thumbnail-card:hover {
+  box-shadow: 0 0 0 2px #6366F1;
+  transform: scale(1.02);
+}
+
+/* ── Pinned layout (true full-screen) ───────────────────────── */
+.video-stage.pinned-layout {
+  display: block;
+  padding: 0;
+  gap: 0;
+  background: #000;
+  position: relative;
+}
+
+/* Pinned main fills the entire stage */
+.pinned-main {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.pinned-main .video-card {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ── Pinned banner (top info strip over the pinned tile) ──────── */
+.pinned-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 1rem;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.72) 0%, transparent 100%);
+  color: rgba(255,255,255,0.85);
+  font-size: 0.78rem;
+  font-weight: 600;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.pinned-banner svg {
+  width: 15px;
+  height: 15px;
+  color: #818CF8;
+  flex-shrink: 0;
+}
+
+.pinned-banner span { flex: 1; }
+
+.pinned-banner-unpin {
+  pointer-events: all;
+  padding: 0.25rem 0.75rem;
+  background: rgba(99,102,241,0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #818CF8;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.pinned-banner-unpin:hover {
+  background: rgba(239,68,68,0.75);
+  border-color: #EF4444;
+}
+
+@media (max-width: 640px) {
+  .pinned-banner { padding: 0.4rem 0.65rem; font-size: 0.7rem; }
+}

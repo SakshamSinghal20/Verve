@@ -69,6 +69,13 @@ const IconPhone = () => (
     </svg>
 );
 
+const IconPin = ({ filled }) => (
+    <svg viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/>
+        <circle cx="12" cy="10" r="3"/>
+    </svg>
+);
+
 const IconCopy = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -89,7 +96,7 @@ function peerColor(peerId) {
     return colors[Math.abs(hash) % colors.length];
 }
 
-function RemoteVideo({ peerId, peerName, stream, handRaised }) {
+function RemoteVideo({ peerId, peerName, stream, handRaised, isPinned, onPin, onUnpin, isThumbnail }) {
     const videoRef = useRef(null);
 
     useEffect(() => {
@@ -102,18 +109,39 @@ function RemoteVideo({ peerId, peerName, stream, handRaised }) {
     const displayName = peerName || `Peer ${peerId.slice(0, 6)}`;
 
     return (
-        <div className="video-card remote">
+        <div className={`video-card remote ${isPinned ? "pinned-card" : ""} ${isThumbnail ? "thumbnail-card" : ""}`}>
             <video ref={videoRef} autoPlay playsInline />
             {!hasVideo && (
                 <div className="cam-off-overlay">
                     <div className="cam-off-avatar" style={{ background: peerColor(peerId) }}>
                         {displayName.slice(0, 1).toUpperCase()}
                     </div>
-                    <p>{displayName}</p>
+                    {!isThumbnail && <p>{displayName}</p>}
                 </div>
             )}
             <div className="video-label">{displayName}</div>
             {handRaised && <div className="hand-badge">✋</div>}
+            {isPinned ? (
+                <button
+                    className="pin-btn pin-btn--active"
+                    onClick={onUnpin}
+                    title="Unpin"
+                    aria-label="Unpin user"
+                >
+                    <IconPin filled />
+                    <span>Pinned</span>
+                </button>
+            ) : (
+                <button
+                    className="pin-btn"
+                    onClick={() => onPin(peerId)}
+                    title="Pin to full screen"
+                    aria-label="Pin user to full screen"
+                >
+                    <IconPin />
+                    <span>Pin</span>
+                </button>
+            )}
         </div>
     );
 }
@@ -164,6 +192,16 @@ function Room() {
     const [toast, setToast] = useState(null);
     const [isCreator, setIsCreator] = useState(false);
     const [roomEnded, setRoomEnded] = useState(false);
+
+    const [pinnedUserId, setPinnedUserId] = useState(null);
+
+    const handlePin = useCallback((peerId) => {
+        setPinnedUserId(peerId);
+    }, []);
+
+    const handleUnpin = useCallback(() => {
+        setPinnedUserId(null);
+    }, []);
 
     function emitAsync(event, data = {}) {
         return new Promise((resolve, reject) => {
@@ -358,6 +396,8 @@ function Room() {
             setRemoteStreams((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
             setPeerInfo((prev) => { const u = { ...prev }; delete u[peerId]; return u; });
             setPeerCount((prev) => Math.max(0, prev - 1));
+            // Auto-unpin if the pinned user leaves
+            setPinnedUserId((prev) => prev === peerId ? null : prev);
         });
 
         sock.on("producer-closed", ({ producerId }) => {
@@ -547,6 +587,15 @@ function Room() {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
+    // Escape key to unpin
+    useEffect(() => {
+        function onKeyDown(e) {
+            if (e.key === "Escape" && pinnedUserId) handleUnpin();
+        }
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [pinnedUserId, handleUnpin]);
+
     const totalParticipants = 1 + Object.keys(remoteStreams).length + (localScreenStream ? 1 : 0) + Object.values(remoteStreams).filter(s => s.screen?.getVideoTracks().some(t => t.readyState === "live")).length;
     const gridClass =
         totalParticipants <= 1 ? "grid-1"
@@ -589,61 +638,96 @@ function Room() {
                 </div>
             </header>
 
-            <main className={`video-stage ${gridClass}`}>
-                <div className="video-card local">
-                    <video
-                        ref={localVideoRef}
-                        autoPlay playsInline muted
-                        className={isCamOff ? "cam-off" : ""}
-                    />
-                    {isCamOff && (
-                        <div className="cam-off-overlay">
-                            <div className="cam-off-avatar">{(user?.name || "Y").slice(0,1).toUpperCase()}</div>
-                            <p>Camera Off</p>
+            {pinnedUserId ? (() => {
+                // ── Pinned layout (true full-screen) ──────────────────────────
+                const pinnedStreams  = remoteStreams[pinnedUserId];
+                const pinnedInfo    = peerInfo[pinnedUserId];
+                const pinnedName    = pinnedInfo?.name || `Peer ${pinnedUserId.slice(0, 6)}`;
+                const pinnedHandKey = pinnedInfo?.userId || pinnedUserId;
+
+                return (
+                    <main className="video-stage pinned-layout">
+                        <div className="pinned-main">
+                            <RemoteVideo
+                                peerId={pinnedUserId}
+                                peerName={pinnedName}
+                                stream={pinnedStreams?.webcam}
+                                handRaised={!!raisedHands[pinnedHandKey]}
+                                isPinned
+                                onPin={handlePin}
+                                onUnpin={handleUnpin}
+                            />
+                            <div className="pinned-banner">
+                                <IconPin filled />
+                                <span>{pinnedName} — Pinned</span>
+                                <button className="pinned-banner-unpin" onClick={handleUnpin}>✕ Unpin</button>
+                            </div>
+                        </div>
+                    </main>
+                );
+            })() : (
+                // ── Default grid layout ──────────────────────────────────────
+                <main className={`video-stage ${gridClass}`}>
+                    <div className="video-card local">
+                        <video
+                            ref={localVideoRef}
+                            autoPlay playsInline muted
+                            className={isCamOff ? "cam-off" : ""}
+                        />
+                        {isCamOff && (
+                            <div className="cam-off-overlay">
+                                <div className="cam-off-avatar">{(user?.name || "Y").slice(0,1).toUpperCase()}</div>
+                                <p>Camera Off</p>
+                            </div>
+                        )}
+                        {isScreenSharing && <div className="screen-share-badge">Sharing screen</div>}
+                        <div className="video-label">You {user?.name ? `(${user.name})` : ""}</div>
+                        {myHandRaised && <div className="hand-badge">✋</div>}
+                    </div>
+
+                    {localScreenStream && (
+                        <div className="video-card local screen-share">
+                            <video
+                                ref={(el) => { if (el) el.srcObject = localScreenStream; }}
+                                autoPlay playsInline muted
+                            />
+                            <div className="video-label">Your Screen</div>
                         </div>
                     )}
-                    {isScreenSharing && <div className="screen-share-badge">Sharing screen</div>}
-                    <div className="video-label">You {user?.name ? `(${user.name})` : ""}</div>
-                    {myHandRaised && <div className="hand-badge">✋</div>}
-                </div>
 
-                {localScreenStream && (
-                    <div className="video-card local screen-share">
-                        <video
-                            ref={(el) => { if (el) el.srcObject = localScreenStream; }}
-                            autoPlay playsInline muted
-                        />
-                        <div className="video-label">Your Screen</div>
-                    </div>
-                )}
-
-                {Object.entries(remoteStreams).map(([peerId, streams]) => {
-                    const info = peerInfo[peerId];
-                    const resolvedName = info?.name || `Peer ${peerId.slice(0, 6)}`;
-                    // Label same user on a different tab clearly
-                    const isSameUser = info?.userId && info.userId === myUserId;
-                    const displayName = isSameUser ? `${resolvedName} (other tab)` : resolvedName;
-                    const handKey = info?.userId || peerId;
-                    return (
-                        <React.Fragment key={peerId}>
-                            <RemoteVideo
-                                peerId={peerId}
-                                peerName={displayName}
-                                stream={streams.webcam}
-                                handRaised={!!raisedHands[handKey]}
-                            />
-                            {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
+                    {Object.entries(remoteStreams).map(([peerId, streams]) => {
+                        const info = peerInfo[peerId];
+                        const resolvedName = info?.name || `Peer ${peerId.slice(0, 6)}`;
+                        const isSameUser = info?.userId && info.userId === myUserId;
+                        const displayName = isSameUser ? `${resolvedName} (other tab)` : resolvedName;
+                        const handKey = info?.userId || peerId;
+                        return (
+                            <React.Fragment key={peerId}>
                                 <RemoteVideo
-                                    peerId={`${peerId}-screen`}
-                                    peerName={`${displayName}'s Screen`}
-                                    stream={streams.screen}
-                                    handRaised={false}
+                                    peerId={peerId}
+                                    peerName={displayName}
+                                    stream={streams.webcam}
+                                    handRaised={!!raisedHands[handKey]}
+                                    isPinned={false}
+                                    onPin={handlePin}
+                                    onUnpin={handleUnpin}
                                 />
-                            )}
-                        </React.Fragment>
-                    );
-                })}
-            </main>
+                                {streams.screen && streams.screen.getVideoTracks().some(t => t.readyState === "live") && (
+                                    <RemoteVideo
+                                        peerId={`${peerId}-screen`}
+                                        peerName={`${displayName}'s Screen`}
+                                        stream={streams.screen}
+                                        handRaised={false}
+                                        isPinned={false}
+                                        onPin={handlePin}
+                                        onUnpin={handleUnpin}
+                                    />
+                                )}
+                            </React.Fragment>
+                        );
+                    })}
+                </main>
+            )}
 
             <div className={`chat-panel ${chatOpen ? "open" : ""}`}>
                 <div className="chat-header">
