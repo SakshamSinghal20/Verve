@@ -273,11 +273,10 @@ function Room() {
 
     useEffect(() => {
         if (authLoading) return;
-        if (!user) navigate("/login", { replace: true });
-    }, [user, authLoading, navigate]);
-
-    useEffect(() => {
-        if (authLoading || !user) return;
+        if (!user) {
+            navigate("/login", { replace: true });
+            return;
+        }
         if (initializedRef.current) return;
         initializedRef.current = true;
 
@@ -465,6 +464,8 @@ function Room() {
         });
 
         sock.on("room-closed", ({ reason }) => {
+            // Guard: if creator already navigated away via handleEndMeeting, skip
+            if (!sock.connected) return;
             setRoomEnded(true);
             setToast({ msg: reason || "Meeting ended by host", hide: false });
             streamRef.current?.getTracks().forEach((t) => t.stop());

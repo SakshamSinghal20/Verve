@@ -185,7 +185,6 @@ function App() {
                     {user && (
                         <div className="user-badge" style={{ marginBottom: "1rem" }}>
                             <span className="user-name">Signed in as {user.name}</span>
-                            <button className="btn-logout" onClick={logout}>Logout</button>
                         </div>
                     )}
 
