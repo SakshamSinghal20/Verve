@@ -5,7 +5,7 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const mongoose = require("mongoose");
-const { v4: uuidv4 } = require("uuid");
+
 const authRoutes = require("./routes/auth");
 const roomRoutes = require("./routes/rooms");
 const Room = require("./models/Room");
@@ -140,7 +140,7 @@ io.on("connection", (socket) => {
 
     socket.roomId = null;
 
-    socket.on("join-room", async (roomId, callback) => {
+    socket.on("join-room", async (rawRoomId, callback) => {
         try {
             if (!worker) {
                 return callback({ error: "Server not ready" });
@@ -149,6 +149,9 @@ io.on("connection", (socket) => {
             if (!socket.user) {
                 return callback({ error: "Authentication required" });
             }
+
+            // Normalize to match the REST routes (which also lowercase + trim)
+            const roomId = rawRoomId.trim().toLowerCase();
 
             const { id: userId, name } = socket.user;
 

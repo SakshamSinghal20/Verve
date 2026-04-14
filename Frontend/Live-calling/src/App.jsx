@@ -56,6 +56,12 @@ function App() {
 
     const { user, loading, logout } = useContext(AuthContext);
 
+    useEffect(() => {
+        fetch(`${API_URL}/`)
+            .then((res) => { if (res.ok) setConnected(true); })
+            .catch(() => setConnected(false));
+    }, []);
+
     function authHeaders() {
         const t = localStorage.getItem("verve-token");
         return t ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }

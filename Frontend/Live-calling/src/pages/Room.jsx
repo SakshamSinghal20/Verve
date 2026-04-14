@@ -206,7 +206,11 @@ function Room() {
 
     function emitAsync(event, data = {}) {
         return new Promise((resolve, reject) => {
-            socketRef.current.emit(event, data, (response) => {
+            const sock = socketRef.current;
+            if (!sock || !sock.connected) {
+                return reject(new Error("Socket not connected"));
+            }
+            sock.emit(event, data, (response) => {
                 if (response?.error) reject(new Error(response.error));
                 else resolve(response);
             });
