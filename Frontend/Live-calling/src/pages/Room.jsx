@@ -531,8 +531,7 @@ function Room() {
 
         sock.on("timer-ended", () => {
             setTimerState(null);
-            setToast({ msg: "Focus time complete! 🎉", hide: false });
-            setTimeout(() => setToast((prev) => prev ? { ...prev, hide: true } : null), 3000);
+            showToast("Focus time complete! 🎉");
         });
 
         sock.on("room-closed", ({ reason }) => {
@@ -595,7 +594,7 @@ function Room() {
     }
 
     function handleEndMeeting() {
-        socketRef.current.emit("end-room");
+        socketRef.current?.emit("end-room");
         streamRef.current?.getTracks().forEach((t) => t.stop());
         producersRef.current.forEach((p) => p.close());
         consumersRef.current.forEach((c) => c.close());
@@ -668,13 +667,23 @@ function Room() {
 
     function toggleChat() {
         setChatOpen((prev) => {
-            if (!prev) setUnreadCount(0);
+            if (!prev) {
+                setUnreadCount(0);
+                setParticipantsOpen(false);
+                setStatsOpen(false);
+            }
             return !prev;
         });
     }
 
     function toggleStats() {
-        setStatsOpen((prev) => !prev);
+        setStatsOpen((prev) => {
+            if (!prev) {
+                setParticipantsOpen(false);
+                setChatOpen(false);
+            }
+            return !prev;
+        });
     }
 
     function formatSpeakingTime(ms) {
@@ -757,6 +766,8 @@ function Room() {
         const SEND_INTERVAL_MS = 3000;
 
         const pollId = setInterval(() => {
+            // Skip counting when user is muted (track.enabled is false)
+            if (!audioTrack.enabled) return;
             analyser.getByteFrequencyData(data);
             const avg = data.reduce((a, b) => a + b, 0) / data.length;
             if (avg > THRESHOLD) speakingMs += POLL_MS;
@@ -776,13 +787,28 @@ function Room() {
         };
     }, [status]); // re-run when stream becomes active (status changes to "live")
 
-    // Escape key to unpin
+    // Escape key to unpin + outside click to dismiss popups
     useEffect(() => {
         function onKeyDown(e) {
-            if (e.key === "Escape" && pinnedInfo) handleUnpin();
+            if (e.key === "Escape") {
+                if (pinnedInfo) handleUnpin();
+                setReactionsOpen(false);
+                setTimerPickerOpen(false);
+            }
+        }
+        function onMouseDown(e) {
+            // Close popups when clicking outside their wrappers
+            if (!e.target.closest('.reactions-wrapper')) {
+                setReactionsOpen(false);
+                setTimerPickerOpen(false);
+            }
         }
         window.addEventListener("keydown", onKeyDown);
-        return () => window.removeEventListener("keydown", onKeyDown);
+        window.addEventListener("mousedown", onMouseDown);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+            window.removeEventListener("mousedown", onMouseDown);
+        };
     }, [pinnedInfo, handleUnpin]);
 
     const totalParticipants = 1 + Object.keys(remoteStreams).length + (localScreenStream ? 1 : 0) + Object.values(remoteStreams).filter(s => s.screen?.getVideoTracks().some(t => t.readyState === "live")).length;
@@ -1138,7 +1164,10 @@ function Room() {
 
                 <button
                     className={`ctrl-btn ${participantsOpen ? "active" : ""}`}
-                    onClick={() => setParticipantsOpen((prev) => !prev)}
+                    onClick={() => setParticipantsOpen((prev) => {
+                        if (!prev) { setChatOpen(false); setStatsOpen(false); }
+                        return !prev;
+                    })}
                     title="Participants"
                     id="btn-toggle-participants"
                 >
