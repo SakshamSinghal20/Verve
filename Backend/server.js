@@ -1,22 +1,51 @@
 require("dotenv").config();
 
 const mediasoup = require("mediasoup");
-const express = require("express");
-const http = require("http");
-const cors = require("cors");
-const mongoose = require("mongoose");
+const express   = require("express");
+const http      = require("http");
+const cors      = require("cors");
+const mongoose  = require("mongoose");
 
 const authRoutes = require("./routes/auth");
 const roomRoutes = require("./routes/rooms");
-const Room = require("./models/Room");
+const Room       = require("./models/Room");
 const { socketAuthMiddleware } = require("./middleware/auth");
 
-const app = express();
+const app    = express();
 const server = http.createServer(app);
 
+// ── Config constants ────────────────────────────────────────────────────────
+
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const SERVER_IP = process.env.SERVER_IP || "127.0.0.1";
-const PORT = process.env.PORT || 5000;
+const SERVER_IP    = process.env.SERVER_IP    || "127.0.0.1";
+const PORT         = process.env.PORT         || 5000;
+
+/** Maximum speaking-update ms accepted per event (prevents runaway accumulation). */
+const MAX_SPEAKING_UPDATE_MS = 10_000;
+
+/** How often speaking stats are broadcast to the room (ms). */
+const SPEAKING_STATS_BROADCAST_MS = 5_000;
+
+/** Minimum focus timer duration (ms). */
+const TIMER_MIN_MS = 60_000;      // 1 minute
+
+/** Maximum focus timer duration (ms). */
+const TIMER_MAX_MS = 3_600_000;   // 60 minutes
+
+/** Mediasoup WebRTC port range (must be open in firewall). */
+const RTC_MIN_PORT = 20_000;
+const RTC_MAX_PORT = 20_200;
+
+/** Initial outgoing bitrate for WebRTC transports (bps). */
+const INITIAL_BITRATE = 1_000_000;
+
+/** Maximum in-memory chat messages retained per room. */
+const MAX_CHAT_HISTORY = 200;
+
+/** Rate-limit for reactions: minimum ms between two reactions from the same socket. */
+const REACTION_RATE_LIMIT_MS = 1_000;
+
+// ── CORS ────────────────────────────────────────────────────────────────────
 
 // Parse allowed origins (comma-separated) and strip trailing slashes
 const allowedOrigins = FRONTEND_URL
@@ -43,30 +72,32 @@ function checkCorsOrigin(origin, callback) {
 app.use(cors({ origin: checkCorsOrigin, credentials: true }));
 app.use(express.json());
 
-app.get("/", (req, res) => {
-    res.send("Server is running");
-});
+app.get("/", (req, res) => res.send("Server is running"));
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth",  authRoutes);
 app.use("/api/rooms", roomRoutes);
+
+// ── Socket.IO ───────────────────────────────────────────────────────────────
 
 const { Server } = require("socket.io");
 const io = new Server(server, {
     cors: {
-        origin: checkCorsOrigin,
-        methods: ["GET", "POST"],
+        origin:      checkCorsOrigin,
+        methods:     ["GET", "POST"],
         credentials: true,
     },
 });
 
 io.use(socketAuthMiddleware);
 
+// ── Mediasoup ───────────────────────────────────────────────────────────────
+
 let worker;
 
 async function createWorker() {
     worker = await mediasoup.createWorker({
-        rtcMinPort: 20000,
-        rtcMaxPort: 20200,
+        rtcMinPort: RTC_MIN_PORT,
+        rtcMaxPort: RTC_MAX_PORT,
     });
     console.log("✅ Mediasoup Worker created");
 
@@ -77,23 +108,21 @@ async function createWorker() {
 }
 
 const mediaCodecs = [
-    {
-        kind: "audio",
-        mimeType: "audio/opus",
-        clockRate: 48000,
-        channels: 2,
-    },
-    {
-        kind: "video",
-        mimeType: "video/VP8",
-        clockRate: 90000,
-    },
+    { kind: "audio", mimeType: "audio/opus", clockRate: 48000, channels: 2 },
+    { kind: "video", mimeType: "video/VP8",  clockRate: 90000 },
 ];
 
 // rooms Map structure:
-// roomId → { router, chatHistory, creatorUserId, usersInRoom (Map: socketId → {userId, name}), peers (Map) }
-// peers: socketId → { sendTransport, recvTransport, producers (Map), consumers (Map) }
+// roomId → { router, chatHistory, creatorUserId,
+//             usersInRoom (Map: socketId → {userId, name}),
+//             peers (Map: socketId → { sendTransport, recvTransport, producers (Map), consumers (Map) }),
+//             speakingTimes (Object: userId → cumulative ms),
+//             statsInterval (setInterval id),
+//             timer ({ durationMs, startedAt } | null),
+//             timerTimeout (setTimeout id | null) }
 const rooms = new Map();
+
+// ── Room helpers ────────────────────────────────────────────────────────────
 
 function getOrCreatePeer(roomId, socketId) {
     const room = rooms.get(roomId);
@@ -123,17 +152,34 @@ async function createWebRtcTransport(router) {
         enableUdp: true,
         enableTcp: true,
         preferUdp: true,
-        initialAvailableOutgoingBitrate: 1000000,
+        initialAvailableOutgoingBitrate: INITIAL_BITRATE,
     });
 
     transport.on("dtlsstatechange", (dtlsState) => {
-        if (dtlsState === "closed") {
-            transport.close();
-        }
+        if (dtlsState === "closed") transport.close();
     });
 
     return transport;
 }
+
+/**
+ * Closes all mediasoup resources for a room and removes it from memory.
+ * Also clears any running intervals/timeouts attached to the room.
+ * Does NOT touch MongoDB — callers handle that separately.
+ */
+function closeRoom(room) {
+    for (const [, peer] of room.peers) {
+        peer.producers.forEach((p) => p.close());
+        peer.consumers.forEach((c) => c.close());
+        peer.sendTransport?.close();
+        peer.recvTransport?.close();
+    }
+    room.router.close();
+    if (room.statsInterval) clearInterval(room.statsInterval);
+    if (room.timerTimeout)  clearTimeout(room.timerTimeout);
+}
+
+// ── Socket.IO event handlers ────────────────────────────────────────────────
 
 io.on("connection", (socket) => {
     console.log(`🔌 User connected: ${socket.id}`);
@@ -142,17 +188,11 @@ io.on("connection", (socket) => {
 
     socket.on("join-room", async (rawRoomId, callback) => {
         try {
-            if (!worker) {
-                return callback({ error: "Server not ready" });
-            }
-
-            if (!socket.user) {
-                return callback({ error: "Authentication required" });
-            }
+            if (!worker) return callback({ error: "Server not ready" });
+            if (!socket.user) return callback({ error: "Authentication required" });
 
             // Normalize to match the REST routes (which also lowercase + trim)
             const roomId = rawRoomId.trim().toLowerCase();
-
             const { id: userId, name } = socket.user;
 
             socket.join(roomId);
@@ -162,14 +202,14 @@ io.on("connection", (socket) => {
                 const router = await worker.createRouter({ mediaCodecs });
                 rooms.set(roomId, {
                     router,
-                    peers: new Map(),
-                    usersInRoom: new Map(),
-                    chatHistory: [],
+                    peers:         new Map(),
+                    usersInRoom:   new Map(),
+                    chatHistory:   [],
                     creatorUserId: userId,
-                    speakingTimes: {},   // userId → cumulative ms
-                    statsInterval: null, // setInterval id for broadcasting stats
-                    timer: null,         // { durationMs, startedAt } when active
-                    timerTimeout: null,  // setTimeout id for auto-expiry
+                    speakingTimes: {},    // userId → cumulative ms
+                    statsInterval: null,  // setInterval id for broadcasting stats
+                    timer:         null,  // { durationMs, startedAt } when active
+                    timerTimeout:  null,  // setTimeout id for auto-expiry
                 });
                 console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
             }
@@ -197,7 +237,7 @@ io.on("connection", (socket) => {
                 rtpCapabilities: room.router.rtpCapabilities,
                 isCreator,
                 myUserId: userId,
-                myName: name,
+                myName:   name,
                 timerState: room.timer || null,
             });
 
@@ -214,26 +254,17 @@ io.on("connection", (socket) => {
         if (!currentRoomId || !rooms.has(currentRoomId)) return;
 
         const room = rooms.get(currentRoomId);
-
         const requestingUserId = socket.user?.id;
+
         if (room.creatorUserId !== requestingUserId) {
             console.warn(`⚠️  Non-creator ${socket.id} attempted to end room ${currentRoomId}`);
             return;
         }
 
         console.log(`🔚 Creator ${socket.id} ended room ${currentRoomId}`);
-
         io.to(currentRoomId).emit("room-closed", { reason: "Host ended the meeting" });
 
-        for (const [, peer] of room.peers) {
-            peer.producers.forEach((p) => p.close());
-            peer.consumers.forEach((c) => c.close());
-            peer.sendTransport?.close();
-            peer.recvTransport?.close();
-        }
-        room.router.close();
-        if (room.statsInterval) clearInterval(room.statsInterval);
-        if (room.timerTimeout) clearTimeout(room.timerTimeout);
+        closeRoom(room);
         rooms.delete(currentRoomId);
 
         try {
@@ -257,11 +288,10 @@ io.on("connection", (socket) => {
             peer.sendTransport = transport;
 
             console.log(`📤 Send transport created for ${socket.id}: ${transport.id}`);
-
             callback({
-                id: transport.id,
-                iceParameters: transport.iceParameters,
-                iceCandidates: transport.iceCandidates,
+                id:             transport.id,
+                iceParameters:  transport.iceParameters,
+                iceCandidates:  transport.iceCandidates,
                 dtlsParameters: transport.dtlsParameters,
             });
         } catch (err) {
@@ -280,11 +310,10 @@ io.on("connection", (socket) => {
             peer.recvTransport = transport;
 
             console.log(`📥 Recv transport created for ${socket.id}: ${transport.id}`);
-
             callback({
-                id: transport.id,
-                iceParameters: transport.iceParameters,
-                iceCandidates: transport.iceCandidates,
+                id:             transport.id,
+                iceParameters:  transport.iceParameters,
+                iceCandidates:  transport.iceCandidates,
                 dtlsParameters: transport.dtlsParameters,
             });
         } catch (err) {
@@ -301,7 +330,6 @@ io.on("connection", (socket) => {
             let transport = null;
             if (peer.sendTransport?.id === transportId) transport = peer.sendTransport;
             if (peer.recvTransport?.id === transportId) transport = peer.recvTransport;
-
             if (!transport) return callback({ error: "Transport not found" });
 
             await transport.connect({ dtlsParameters });
@@ -316,14 +344,12 @@ io.on("connection", (socket) => {
     socket.on("produce", async ({ transportId, kind, rtpParameters, appData }, callback) => {
         try {
             const peer = getOrCreatePeer(socket.roomId, socket.id);
-
             if (!peer?.sendTransport || peer.sendTransport.id !== transportId) {
                 return callback({ error: "Send transport not found" });
             }
 
             const producer = await peer.sendTransport.produce({ kind, rtpParameters, appData });
             peer.producers.set(producer.id, producer);
-
             console.log(`🎬 Producer created for ${socket.id}: ${producer.id} (${kind})`);
 
             producer.on("transportclose", () => {
@@ -333,13 +359,13 @@ io.on("connection", (socket) => {
 
             callback({ id: producer.id });
 
-            const room = rooms.get(socket.roomId);
+            const room     = rooms.get(socket.roomId);
             const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
             socket.to(socket.roomId).emit("new-producer", {
                 producerId: producer.id,
-                peerId: socket.id,
-                userId: identity.userId,
-                name: identity.name,
+                peerId:     socket.id,
+                userId:     identity.userId,
+                name:       identity.name,
                 kind,
                 appData,
             });
@@ -362,19 +388,13 @@ io.on("connection", (socket) => {
             }
 
             // Start paused — client calls resume-consumer after setup
-            const consumer = await peer.recvTransport.consume({
-                producerId,
-                rtpCapabilities,
-                paused: true,
-            });
-
+            const consumer = await peer.recvTransport.consume({ producerId, rtpCapabilities, paused: true });
             peer.consumers.set(consumer.id, consumer);
 
             consumer.on("transportclose", () => {
                 consumer.close();
                 peer.consumers.delete(consumer.id);
             });
-
             consumer.on("producerclose", () => {
                 consumer.close();
                 peer.consumers.delete(consumer.id);
@@ -382,11 +402,10 @@ io.on("connection", (socket) => {
             });
 
             console.log(`👁️ Consumer created for ${socket.id}: ${consumer.id} (${consumer.kind})`);
-
             callback({
-                id: consumer.id,
+                id:            consumer.id,
                 producerId,
-                kind: consumer.kind,
+                kind:          consumer.kind,
                 rtpParameters: consumer.rtpParameters,
             });
         } catch (err) {
@@ -397,7 +416,7 @@ io.on("connection", (socket) => {
 
     socket.on("resume-consumer", async ({ consumerId }, callback) => {
         try {
-            const peer = getOrCreatePeer(socket.roomId, socket.id);
+            const peer     = getOrCreatePeer(socket.roomId, socket.id);
             const consumer = peer?.consumers.get(consumerId);
             if (!consumer) return callback({ error: "Consumer not found" });
 
@@ -416,24 +435,20 @@ io.on("connection", (socket) => {
             if (!room) return callback({ error: "Room not found" });
 
             const producers = [];
-
             for (const [peerId, peer] of room.peers) {
                 if (peerId === socket.id) continue;
-
                 const identity = room.usersInRoom.get(peerId) || { userId: peerId, name: "Unknown" };
-
                 for (const [producerId, producer] of peer.producers) {
                     producers.push({
                         producerId,
                         peerId,
-                        userId: identity.userId,
-                        name: identity.name,
-                        kind: producer.kind,
+                        userId:  identity.userId,
+                        name:    identity.name,
+                        kind:    producer.kind,
                         appData: producer.appData,
                     });
                 }
             }
-
             callback({ producers });
         } catch (err) {
             console.error("get-producers error:", err);
@@ -447,18 +462,17 @@ io.on("connection", (socket) => {
             if (!room) return callback?.({ error: "Room not found" });
 
             const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
-
             const chatMessage = {
-                peerId: socket.id,
-                userId: identity.userId,
-                name: identity.name,
+                peerId:    socket.id,
+                userId:    identity.userId,
+                name:      identity.name,
                 message,
                 timestamp: Date.now(),
             };
 
             room.chatHistory.push(chatMessage);
-            if (room.chatHistory.length > 200) {
-                room.chatHistory = room.chatHistory.slice(-200);
+            if (room.chatHistory.length > MAX_CHAT_HISTORY) {
+                room.chatHistory = room.chatHistory.slice(-MAX_CHAT_HISTORY);
             }
 
             io.to(socket.roomId).emit("new-message", chatMessage);
@@ -482,12 +496,12 @@ io.on("connection", (socket) => {
 
     socket.on("raise-hand", ({ raised }) => {
         if (!socket.roomId) return;
-        const room = rooms.get(socket.roomId);
+        const room     = rooms.get(socket.roomId);
         const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
         io.to(socket.roomId).emit("hand-raised", {
             peerId: socket.id,
             userId: identity.userId,
-            name: identity.name,
+            name:   identity.name,
             raised,
         });
     });
@@ -502,16 +516,16 @@ io.on("connection", (socket) => {
 
         const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
 
-        // Rate limit: max 1 reaction per second per socket
+        // Rate limit: max 1 reaction per REACTION_RATE_LIMIT_MS per socket
         const now = Date.now();
-        if (socket._lastReaction && now - socket._lastReaction < 1000) return;
+        if (socket._lastReaction && now - socket._lastReaction < REACTION_RATE_LIMIT_MS) return;
         socket._lastReaction = now;
 
         io.to(socket.roomId).emit("reaction", {
             type,
-            peerId: socket.id,
-            userId: identity.userId,
-            name: identity.name,
+            peerId:    socket.id,
+            userId:    identity.userId,
+            name:      identity.name,
             timestamp: now,
         });
     });
@@ -525,19 +539,19 @@ io.on("connection", (socket) => {
         const userId = socket.user?.id;
         if (!userId || typeof durationMs !== "number" || durationMs < 0) return;
 
-        // Accumulate speaking time (cap at 10s per update to prevent abuse)
-        room.speakingTimes[userId] = (room.speakingTimes[userId] || 0) + Math.min(durationMs, 10000);
+        // Cap per-update to prevent abuse; accumulate on the server
+        room.speakingTimes[userId] = (room.speakingTimes[userId] || 0) + Math.min(durationMs, MAX_SPEAKING_UPDATE_MS);
 
-        // Start broadcasting stats interval if not already running
+        // Start broadcasting stats interval lazily (once per room)
         if (!room.statsInterval) {
             const rid = socket.roomId;
             room.statsInterval = setInterval(() => {
                 const r = rooms.get(rid);
                 if (!r) return;
-                // Build stats with names
+
+                // Attach display names to each userId entry
                 const stats = {};
                 for (const [uid, ms] of Object.entries(r.speakingTimes)) {
-                    // Find name for this userId
                     let name = "Unknown";
                     for (const [, info] of r.usersInRoom) {
                         if (info.userId === uid) { name = info.name; break; }
@@ -545,7 +559,7 @@ io.on("connection", (socket) => {
                     stats[uid] = { ms, name };
                 }
                 io.to(rid).emit("speaking-stats", { stats });
-            }, 5000);
+            }, SPEAKING_STATS_BROADCAST_MS);
         }
     });
 
@@ -558,25 +572,20 @@ io.on("connection", (socket) => {
         // Only the creator can start a timer
         if (room.creatorUserId !== socket.user?.id) return;
 
-        // Validate duration (1 min to 60 min)
-        if (typeof durationMs !== "number" || durationMs < 60000 || durationMs > 3600000) return;
+        // Validate duration bounds
+        if (typeof durationMs !== "number" || durationMs < TIMER_MIN_MS || durationMs > TIMER_MAX_MS) return;
 
-        // Clear any existing timer
         if (room.timerTimeout) clearTimeout(room.timerTimeout);
 
         const startedAt = Date.now();
         room.timer = { durationMs, startedAt };
-
         io.to(socket.roomId).emit("timer-sync", room.timer);
 
         // Auto-expire when duration elapses
         const rid = socket.roomId;
         room.timerTimeout = setTimeout(() => {
             const r = rooms.get(rid);
-            if (r) {
-                r.timer = null;
-                r.timerTimeout = null;
-            }
+            if (r) { r.timer = null; r.timerTimeout = null; }
             io.to(rid).emit("timer-ended");
         }, durationMs);
     });
@@ -590,101 +599,94 @@ io.on("connection", (socket) => {
         if (room.creatorUserId !== socket.user?.id) return;
 
         if (room.timerTimeout) clearTimeout(room.timerTimeout);
-        room.timer = null;
+        room.timer        = null;
         room.timerTimeout = null;
-
         io.to(socket.roomId).emit("timer-ended");
     });
 
+    // ── Disconnect ──────────────────────────────────────────────────────────
     socket.on("disconnect", async () => {
         console.log(`🔴 User disconnected: ${socket.id}`);
 
-        if (socket.roomId && rooms.has(socket.roomId)) {
-            const currentRoomId = socket.roomId;
-            const room = rooms.get(currentRoomId);
-            const peer = room.peers.get(socket.id);
+        if (!socket.roomId || !rooms.has(socket.roomId)) return;
 
-            const disconnectingUserId = socket.user?.id;
-            // Check userId (not socketId) so it works even if creator had multiple tabs open
-            const isLastCreatorTab = room.creatorUserId === disconnectingUserId &&
-                Array.from(room.usersInRoom.values()).filter(u => u.userId === disconnectingUserId).length <= 1;
+        const currentRoomId        = socket.roomId;
+        const room                 = rooms.get(currentRoomId);
+        const disconnectingUserId  = socket.user?.id;
 
-            if (isLastCreatorTab) {
-                console.log(`🔚 Creator ${socket.user?.name} (last tab) disconnected — closing room ${currentRoomId}`);
+        // Check userId (not socketId) so it works even if creator had multiple tabs open
+        const isLastCreatorTab =
+            room.creatorUserId === disconnectingUserId &&
+            Array.from(room.usersInRoom.values()).filter((u) => u.userId === disconnectingUserId).length <= 1;
 
-                socket.to(currentRoomId).emit("room-closed", { reason: "Host left the meeting" });
+        if (isLastCreatorTab) {
+            console.log(`🔚 Creator ${socket.user?.name} (last tab) disconnected — closing room ${currentRoomId}`);
+            socket.to(currentRoomId).emit("room-closed", { reason: "Host left the meeting" });
 
-                for (const [, p] of room.peers) {
-                    p.producers.forEach((prod) => prod.close());
-                    p.consumers.forEach((cons) => cons.close());
-                    p.sendTransport?.close();
-                    p.recvTransport?.close();
-                }
-                room.router.close();
-                if (room.statsInterval) clearInterval(room.statsInterval);
-                if (room.timerTimeout) clearTimeout(room.timerTimeout);
-                rooms.delete(currentRoomId);
+            closeRoom(room);
+            rooms.delete(currentRoomId);
 
-                try {
-                    await Room.findOneAndUpdate(
-                        { roomId: currentRoomId },
-                        { isActive: false, participants: [] }
-                    );
-                    console.log(`📝 Room ${currentRoomId} expired in MongoDB (creator disconnected)`);
-                } catch (dbErr) {
-                    console.error("MongoDB sync (creator-disconnect) error:", dbErr.message);
-                }
-                return;
+            try {
+                await Room.findOneAndUpdate(
+                    { roomId: currentRoomId },
+                    { isActive: false, participants: [] }
+                );
+                console.log(`📝 Room ${currentRoomId} expired in MongoDB (creator disconnected)`);
+            } catch (dbErr) {
+                console.error("MongoDB sync (creator-disconnect) error:", dbErr.message);
             }
+            return;
+        }
 
-            // Read identity BEFORE deleting — needed for the peer-left broadcast
-            const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+        // Read identity BEFORE deleting — needed for the peer-left broadcast
+        const leftIdentity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+        const peer         = room.peers.get(socket.id);
 
-            if (peer) {
-                peer.producers.forEach((producer) => producer.close());
-                peer.consumers.forEach((consumer) => consumer.close());
-                peer.sendTransport?.close();
-                peer.recvTransport?.close();
-                room.peers.delete(socket.id);
+        if (peer) {
+            peer.producers.forEach((producer) => producer.close());
+            peer.consumers.forEach((consumer) => consumer.close());
+            peer.sendTransport?.close();
+            peer.recvTransport?.close();
+            room.peers.delete(socket.id);
+        }
+
+        socket.to(currentRoomId).emit("peer-left", {
+            peerId: socket.id,
+            userId: leftIdentity.userId,
+        });
+
+        room.usersInRoom.delete(socket.id);
+        io.to(currentRoomId).emit("peers-list", { peers: buildPeersList(room) });
+
+        if (room.peers.size === 0) {
+            // Last participant left — clean up the room entirely
+            closeRoom(room);
+            rooms.delete(currentRoomId);
+            console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
+
+            try {
+                await Room.findOneAndUpdate(
+                    { roomId: currentRoomId },
+                    { isActive: false, participants: [] }
+                );
+                console.log(`📝 Room ${currentRoomId} marked inactive in MongoDB`);
+            } catch (dbErr) {
+                console.error("MongoDB sync (delete) error:", dbErr.message);
             }
-
-            socket.to(currentRoomId).emit("peer-left", {
-                peerId: socket.id,
-                userId: leftIdentity.userId,
-            });
-
-            room.usersInRoom.delete(socket.id);
-            io.to(currentRoomId).emit("peers-list", { peers: buildPeersList(room) });
-
-            if (room.peers.size === 0) {
-                room.router.close();
-                if (room.statsInterval) clearInterval(room.statsInterval);
-                if (room.timerTimeout) clearTimeout(room.timerTimeout);
-                rooms.delete(currentRoomId);
-                console.log(`🗑️ Room ${currentRoomId} deleted (empty)`);
-
-                try {
-                    await Room.findOneAndUpdate(
-                        { roomId: currentRoomId },
-                        { isActive: false, participants: [] }
-                    );
-                    console.log(`📝 Room ${currentRoomId} marked inactive in MongoDB`);
-                } catch (dbErr) {
-                    console.error("MongoDB sync (delete) error:", dbErr.message);
-                }
-            } else {
-                try {
-                    await Room.findOneAndUpdate(
-                        { roomId: currentRoomId },
-                        { $pull: { participants: disconnectingUserId } }
-                    );
-                } catch (dbErr) {
-                    console.error("MongoDB sync (leave) error:", dbErr.message);
-                }
+        } else {
+            try {
+                await Room.findOneAndUpdate(
+                    { roomId: currentRoomId },
+                    { $pull: { participants: disconnectingUserId } }
+                );
+            } catch (dbErr) {
+                console.error("MongoDB sync (leave) error:", dbErr.message);
             }
         }
     });
 });
+
+// ── Server startup ──────────────────────────────────────────────────────────
 
 async function startServer() {
     const MONGO_URI = process.env.MONGO_URI;
