@@ -157,7 +157,7 @@ function App() {
                         disabled={loadingInstant}
                         id="btn-create-meeting"
                     >
-                        <IconVideo />
+                        <IconVideo className="btn-icon-svg" />
                         {loadingInstant ? "Creating…" : "Start Instant Meeting"}
                     </button>
 
@@ -166,7 +166,7 @@ function App() {
                         onClick={() => setCustomOpen(!customOpen)}
                         type="button"
                     >
-                        <IconPlus />
+                        <IconPlus className="btn-icon-svg" />
                         <span>Create with Custom ID</span>
                         <IconChevron open={customOpen} />
                     </button>
@@ -213,7 +213,7 @@ function App() {
                             id="btn-join-meeting"
                         >
                             <span>{loadingJoin ? "Joining…" : "Join"}</span>
-                            <IconArrow />
+                            <IconArrow className="btn-icon-svg" />
                         </button>
                     </div>
                 </div>
