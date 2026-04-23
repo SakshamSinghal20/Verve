@@ -2,60 +2,28 @@ import "./App.css";
 import { useEffect, useState, useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
+import {
+    IconVideo, IconArrow, IconPlus,
+    IconLock, IconZap, IconChat, IconMonitor, IconChevron,
+} from "./components/Icons";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
-const IconVideo = () => (
-    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-    </svg>
-);
-
-const IconArrow = () => (
-    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-    </svg>
-);
-
-const IconPlus = () => (
-    <svg className="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-);
-
-const IconLock = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-);
-const IconZap = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-);
-const IconChat = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-);
-const IconMonitor = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-);
-
-const IconChevron = ({ open }) => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-         style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.25s ease" }}>
-        <polyline points="6 9 12 15 18 9" />
-    </svg>
-);
-
 function App() {
-    const [roomId, setRoomId]               = useState("");
-    const [customRoomId, setCustomRoomId]   = useState("");
-    const [connected, setConnected]         = useState(false);
-    const [toast, setToast]                 = useState(null);
-    const [customOpen, setCustomOpen]       = useState(false);
-    const [loadingInstant, setLoadingInstant] = useState(false);
-    const [loadingCustom, setLoadingCustom]   = useState(false);
-    const [loadingJoin, setLoadingJoin]       = useState(false);
-    const navigate = useNavigate();
+    const [roomId,       setRoomId]       = useState("");
+    const [customRoomId, setCustomRoomId] = useState("");
+    const [connected,    setConnected]    = useState(false);
+    const [toast,        setToast]        = useState(null);
+    const [customOpen,   setCustomOpen]   = useState(false);
 
+    const [loadingInstant, setLoadingInstant] = useState(false);
+    const [loadingCustom,  setLoadingCustom]  = useState(false);
+    const [loadingJoin,    setLoadingJoin]    = useState(false);
+
+    const navigate = useNavigate();
     const { user, loading, logout } = useContext(AuthContext);
 
+    // Check server reachability on mount
     useEffect(() => {
         fetch(`${API_URL}/`)
             .then((res) => { if (res.ok) setConnected(true); })
@@ -64,8 +32,9 @@ function App() {
 
     function authHeaders() {
         const t = localStorage.getItem("verve-token");
-        return t ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }
-                 : { "Content-Type": "application/json" };
+        return t
+            ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }
+            : { "Content-Type": "application/json" };
     }
 
     function showToast(msg, type = "success") {
@@ -78,10 +47,7 @@ function App() {
         if (!user) { navigate("/login"); return; }
         setLoadingInstant(true);
         try {
-            const res = await fetch(`${API_URL}/api/rooms/instant`, {
-                method: "POST",
-                headers: authHeaders(),
-            });
+            const res  = await fetch(`${API_URL}/api/rooms/instant`, { method: "POST", headers: authHeaders() });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Failed to create room");
             navigate(`/room/${data.roomId}`);
@@ -98,7 +64,7 @@ function App() {
         if (!trimmed) return;
         setLoadingCustom(true);
         try {
-            const res = await fetch(`${API_URL}/api/rooms`, {
+            const res  = await fetch(`${API_URL}/api/rooms`, {
                 method: "POST",
                 headers: authHeaders(),
                 body: JSON.stringify({ roomId: trimmed }),
@@ -119,7 +85,7 @@ function App() {
         if (!trimmed) return;
         setLoadingJoin(true);
         try {
-            const res = await fetch(`${API_URL}/api/rooms/join`, {
+            const res  = await fetch(`${API_URL}/api/rooms/join`, {
                 method: "POST",
                 headers: authHeaders(),
                 body: JSON.stringify({ roomId: trimmed }),
@@ -134,20 +100,19 @@ function App() {
         }
     }
 
-    const handleJoinKeyDown = (e) => { if (e.key === "Enter") handleJoin(); };
+    const handleJoinKeyDown   = (e) => { if (e.key === "Enter") handleJoin(); };
     const handleCustomKeyDown = (e) => { if (e.key === "Enter") handleCustomCreate(); };
 
     if (loading) {
         return (
-            <div className="landing-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <div style={{ color: 'var(--text)', fontSize: '1.2rem' }}>Loading Verve...</div>
+            <div className="landing-container" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+                <div style={{ color: "var(--text)", fontSize: "1.2rem" }}>Loading Verve...</div>
             </div>
         );
     }
 
     return (
         <div className="landing-container">
-
             <nav className="landing-nav">
                 <span className="nav-logo">Verve</span>
                 {!user ? (
@@ -173,9 +138,7 @@ function App() {
 
                 <h1 className="hero-brand">Verve</h1>
 
-                <p className="hero-headline">
-                    Simple, fast video meetings
-                </p>
+                <p className="hero-headline">Simple, fast video meetings</p>
 
                 <p className="hero-subtext">
                     No downloads. Just share a link and start talking — crystal-clear calls that work everywhere.
