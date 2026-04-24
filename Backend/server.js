@@ -21,29 +21,29 @@ const SERVER_IP    = process.env.SERVER_IP    || "127.0.0.1";
 const PORT         = process.env.PORT         || 5000;
 
 /** Maximum speaking-update ms accepted per event (prevents runaway accumulation). */
-const MAX_SPEAKING_UPDATE_MS = 10_000;
+const MAX_SPEAKING_UPDATE_MS = 10000;
 
 /** How often speaking stats are broadcast to the room (ms). */
-const SPEAKING_STATS_BROADCAST_MS = 5_000;
+const SPEAKING_STATS_BROADCAST_MS = 5000;
 
 /** Minimum focus timer duration (ms). */
-const TIMER_MIN_MS = 60_000;      // 1 minute
+const TIMER_MIN_MS = 60000;      // 1 minute
 
 /** Maximum focus timer duration (ms). */
-const TIMER_MAX_MS = 3_600_000;   // 60 minutes
+const TIMER_MAX_MS = 3600000;   // 60 minutes
 
 /** Mediasoup WebRTC port range (must be open in firewall). */
-const RTC_MIN_PORT = 20_000;
-const RTC_MAX_PORT = 20_200;
+const RTC_MIN_PORT = 20000;
+const RTC_MAX_PORT = 20200;
 
 /** Initial outgoing bitrate for WebRTC transports (bps). */
-const INITIAL_BITRATE = 1_000_000;
+const INITIAL_BITRATE = 1000000;
 
 /** Maximum in-memory chat messages retained per room. */
 const MAX_CHAT_HISTORY = 200;
 
 /** Rate-limit for reactions: minimum ms between two reactions from the same socket. */
-const REACTION_RATE_LIMIT_MS = 1_000;
+const REACTION_RATE_LIMIT_MS = 1000;
 
 // ── CORS ────────────────────────────────────────────────────────────────────
 
