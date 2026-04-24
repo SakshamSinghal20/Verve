@@ -112,14 +112,7 @@ const mediaCodecs = [
     { kind: "video", mimeType: "video/VP8",  clockRate: 90000 },
 ];
 
-// rooms Map structure:
-// roomId → { router, chatHistory, creatorUserId,
-//             usersInRoom (Map: socketId → {userId, name}),
-//             peers (Map: socketId → { sendTransport, recvTransport, producers (Map), consumers (Map) }),
-//             speakingTimes (Object: userId → cumulative ms),
-//             statsInterval (setInterval id),
-//             timer ({ durationMs, startedAt } | null),
-//             timerTimeout (setTimeout id | null) }
+
 const rooms = new Map();
 
 // ── Room helpers ────────────────────────────────────────────────────────────
