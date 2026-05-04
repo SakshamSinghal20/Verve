@@ -99,7 +99,7 @@
   gap: 1.25rem;
   width: 100%;
   max-width: 640px;
-  padding: 7rem 1.5rem 2rem;
+  padding: 5rem 1.5rem 1rem;
   animation: slide-up 0.5s ease both;
 }
 
@@ -407,7 +407,7 @@
   gap: 1.5rem;
   width: 100%;
   max-width: 640px;
-  padding: 0 1.5rem 2rem;
+  padding: 0 1.5rem 1rem;
   animation: slide-up 0.6s ease 0.1s both;
   justify-content: space-between;
 }
@@ -441,7 +441,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-bottom: 2rem;
+  padding-bottom: 1rem;
   animation: fade-in 0.8s ease 0.2s both;
 }
 
@@ -535,5 +535,5 @@
   .hero-card { padding: 1.5rem; }
   .landing-nav { padding: 1rem 1.5rem; }
   .hero-brand { font-size: clamp(2.5rem, 12vw, 3.5rem); }
-  .landing-content { padding-top: 5.5rem; }
+  .landing-content { padding-top: 4rem; }
 }
