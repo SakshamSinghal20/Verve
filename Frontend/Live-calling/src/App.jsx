@@ -6,6 +6,7 @@ import {
     IconVideo, IconArrow, IconPlus,
     IconLock, IconZap, IconChat, IconMonitor, IconChevron,
 } from "./components/Icons";
+import ParticleField from "./components/ParticleField";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
@@ -113,6 +114,8 @@ function App() {
 
     return (
         <div className="landing-container">
+            <ParticleField />
+            <div className="landing-grain" aria-hidden="true" />
             <nav className="landing-nav">
                 <span className="nav-logo">Verve</span>
                 {!user ? (
@@ -144,7 +147,14 @@ function App() {
                     No downloads. Just share a link and start talking — crystal-clear calls that work everywhere.
                 </p>
 
-                <div className="hero-card">
+                <div
+                    className="hero-card"
+                    onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        e.currentTarget.style.setProperty('--x', `${e.clientX - rect.left}px`);
+                        e.currentTarget.style.setProperty('--y', `${e.clientY - rect.top}px`);
+                    }}
+                >
                     {user && (
                         <div className="user-badge" style={{ marginBottom: "1rem" }}>
                             <span className="user-name">Signed in as {user.name}</span>
