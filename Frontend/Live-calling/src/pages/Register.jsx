@@ -1,6 +1,7 @@
 import { useState, useContext } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import ParticleField from "../components/ParticleField";
 import "./Auth.css";
 
 const IconEye = () => (
@@ -44,7 +45,16 @@ function Register() {
 
     return (
         <div className="auth-container">
-            <form className="auth-card" onSubmit={handleSubmit}>
+            <ParticleField />
+            <form
+                className="auth-card"
+                onSubmit={handleSubmit}
+                onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    e.currentTarget.style.setProperty('--x', `${e.clientX - rect.left}px`);
+                    e.currentTarget.style.setProperty('--y', `${e.clientY - rect.top}px`);
+                }}
+            >
                 <span className="auth-logo">Verve</span>
                 <h1 className="auth-title">Create your account</h1>
                 <p className="auth-subtitle">Join Verve and start video calling instantly</p>
