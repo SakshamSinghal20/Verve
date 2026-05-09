@@ -260,18 +260,20 @@ body:has(.room-container) #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.9rem 1.25rem;
-  background: #0a0a0a;
-  border-top: 1px solid #1e1e1e;
+  gap: 0.55rem;
+  padding: 0.85rem 1.25rem;
+  background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.95) 100%);
+  border-top: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .controls-divider {
   width: 1px;
-  height: 32px;
-  background: #2a2a2a;
-  margin: 0 0.25rem;
+  height: 28px;
+  background: rgba(255,255,255,0.08);
+  margin: 0 0.35rem;
   flex-shrink: 0;
 }
 
@@ -280,96 +282,110 @@ body:has(.room-container) #root {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.6rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #2a2a2a;
-  background: #111;
-  color: #bbb;
+  gap: 0.35rem;
+  padding: 0.55rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: rgba(226,232,240,0.7);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
-  min-width: 60px;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.18s ease, box-shadow 0.25s ease;
+  min-width: 68px;
 }
 
 .ctrl-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
+  transition: filter 0.25s ease, transform 0.25s ease;
+  filter: drop-shadow(0 0 0 transparent);
 }
 
 .ctrl-btn span {
-  font-size: 0.6rem;
-  font-weight: 600;
+  font-size: 0.58rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #475569;
-  transition: color 0.2s ease;
+  letter-spacing: 0.6px;
+  color: rgba(226,232,240,0.4);
+  transition: color 0.25s ease;
 }
 
 .ctrl-btn:hover {
-  background: #1a1a1a;
-  border-color: #444;
-  color: #fff;
-  transform: translateY(-1px);
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(0,240,255,0.25);
+  color: #00F0FF;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,240,255,0.08);
 }
 
-.ctrl-btn:hover span { color: #94A3B8; }
+.ctrl-btn:hover svg {
+  filter: drop-shadow(0 0 6px rgba(0,240,255,0.4));
+  transform: scale(1.08);
+}
+
+.ctrl-btn:hover span { color: rgba(0,240,255,0.7); }
 .ctrl-btn:active { transform: translateY(0); }
 
-/* Active state */
+/* Active state — cyan glow */
 .ctrl-btn.active {
-  background: rgba(99,102,241,0.15);
-  border-color: rgba(99,102,241,0.4);
-  color: #818CF8;
-  box-shadow: 0 0 14px rgba(99,102,241,0.15);
+  background: rgba(0,240,255,0.08);
+  border-color: rgba(0,240,255,0.35);
+  color: #00F0FF;
+  box-shadow: 0 0 20px rgba(0,240,255,0.15), 0 4px 16px rgba(0,240,255,0.08);
 }
 
-.ctrl-btn.active span { color: #818CF8; }
+.ctrl-btn.active svg { filter: drop-shadow(0 0 8px rgba(0,240,255,0.5)); }
+.ctrl-btn.active span { color: #00F0FF; }
 
-/* Muted state */
+/* Muted state — red glow */
 .ctrl-btn.muted {
-  background: rgba(239,68,68,0.1);
-  border-color: rgba(239,68,68,0.35);
-  color: #EF4444;
+  background: rgba(239,68,68,0.08);
+  border-color: rgba(239,68,68,0.3);
+  color: #FF6B6B;
+  box-shadow: 0 0 16px rgba(239,68,68,0.1);
 }
 
-.ctrl-btn.muted span { color: #EF4444; }
+.ctrl-btn.muted svg { filter: drop-shadow(0 0 6px rgba(239,68,68,0.4)); }
+.ctrl-btn.muted span { color: #FF6B6B; }
 
 /* Leave button */
 .ctrl-btn.leave {
-  background: rgba(239,68,68,0.1);
-  border-color: rgba(239,68,68,0.3);
-  color: #EF4444;
-  min-width: 72px;
+  background: rgba(239,68,68,0.08);
+  border-color: rgba(239,68,68,0.25);
+  color: #FF6B6B;
+  min-width: 76px;
+  border-radius: 9999px;
 }
 
 .ctrl-btn.leave:hover {
-  background: rgba(239,68,68,0.2);
-  border-color: #EF4444;
-  color: #EF4444;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 18px rgba(239,68,68,0.25);
+  background: rgba(239,68,68,0.18);
+  border-color: rgba(239,68,68,0.5);
+  color: #FF6B6B;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(239,68,68,0.25);
 }
 
-.ctrl-btn.leave span { color: #EF4444; }
+.ctrl-btn.leave svg { filter: drop-shadow(0 0 4px rgba(239,68,68,0.3)); }
+.ctrl-btn.leave span { color: #FF6B6B; }
 
 /* End Meeting button (creator only) */
 .ctrl-btn.end-meeting {
-  background: rgba(239,68,68,0.18);
-  border-color: rgba(239,68,68,0.5);
-  color: #EF4444;
-  min-width: 88px;
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.4);
+  color: #FF6B6B;
+  min-width: 96px;
+  border-radius: 9999px;
 }
 
 .ctrl-btn.end-meeting:hover {
   background: #EF4444;
   border-color: #EF4444;
   color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 22px rgba(239,68,68,0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 28px rgba(239,68,68,0.4);
 }
 
-.ctrl-btn.end-meeting span { color: #EF4444; }
+.ctrl-btn.end-meeting span { color: #FF6B6B; }
 .ctrl-btn.end-meeting:hover span { color: #fff; }
 
 /* ── Room-ended overlay ──────────────────────────────────── */
