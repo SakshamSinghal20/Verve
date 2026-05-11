@@ -54,7 +54,10 @@ function playReactionChime(type) {
  * Returns an object containing reactive state and action callbacks that
  * Room.jsx can use without knowing about the underlying socket/transport layer.
  */
-export default function useRoomSocket(roomId, user, authLoading) {
+export default function useRoomSocket(roomId, user, authLoading, embedToken = null, forceEmbedMode = false) {
+    // isEmbedMode is true when called from the embed route, even if the token is
+    // null or malformed — error display is handled by EmbedRoom, not this hook.
+    const isEmbedMode = forceEmbedMode || !!embedToken;
     const navigate = useNavigate();
 
     // ── Refs (not reactive — used inside callbacks) ────────────────────────
@@ -163,11 +166,12 @@ export default function useRoomSocket(roomId, user, authLoading) {
 
     useEffect(() => {
         if (authLoading) return;
-        if (!user) { navigate("/login", { replace: true }); return; }
+        if (!user && !isEmbedMode) { navigate("/login", { replace: true }); return; }
+        if (!user && isEmbedMode) return; // wait for embed user to be set
         if (initializedRef.current) return;
         initializedRef.current = true;
 
-        const sock = createSocket();
+        const sock = createSocket(embedToken);
         socketRef.current = sock;
         sock.connect();
 
@@ -369,7 +373,8 @@ export default function useRoomSocket(roomId, user, authLoading) {
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             sock.disconnect();
         };
-    }, [roomId, consumeProducer, user, authLoading, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [roomId, consumeProducer, user, authLoading, navigate, embedToken, isEmbedMode]);
 
     // ── Timer countdown tick ───────────────────────────────────────────────
     useEffect(() => {
@@ -459,7 +464,12 @@ export default function useRoomSocket(roomId, user, authLoading) {
         sendTransportRef.current?.close();
         recvTransportRef.current?.close();
         socketRef.current?.disconnect();
-        navigate("/");
+        if (isEmbedMode) {
+            setRoomEnded(true);
+            setToast({ msg: "You left the meeting", hide: false });
+        } else {
+            navigate("/");
+        }
     }
 
     function handleEndMeeting() {
@@ -470,7 +480,11 @@ export default function useRoomSocket(roomId, user, authLoading) {
         screenProducerRef.current?.close();
         sendTransportRef.current?.close();
         recvTransportRef.current?.close();
-        navigate("/");
+        if (isEmbedMode) {
+            setRoomEnded(true);
+        } else {
+            navigate("/");
+        }
     }
 
     async function toggleScreenShare() {
@@ -591,5 +605,6 @@ export default function useRoomSocket(roomId, user, authLoading) {
         copyRoomLink,
         handlePin,
         handleUnpin,
+        isEmbedMode,
     };
 }

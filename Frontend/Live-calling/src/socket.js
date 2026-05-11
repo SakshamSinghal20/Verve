@@ -10,11 +10,13 @@ const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 /**
  * Creates a new Socket.IO instance for a room session.
  * The socket is NOT connected until you call socket.connect().
+ * @param {string} [embedToken] — optional embed JWT; if provided, overrides localStorage token.
  */
-export function createSocket() {
-    const token = localStorage.getItem("verve-token");
+export function createSocket(embedToken) {
+    const token = embedToken || localStorage.getItem("verve-token");
     return io(API_URL, {
         autoConnect: false,   // don't connect automatically — Room.jsx controls lifecycle
         auth: token ? { token } : {},
     });
 }
+
