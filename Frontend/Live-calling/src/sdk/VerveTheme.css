@@ -1,0 +1,79 @@
+/* ── Verve SDK Theme Layer ───────────────────────────────────────────────────
+ * Lightweight CSS-variable theming for the prebuilt SDK components.
+ *
+ * Developers override these variables to customize appearance:
+ *
+ *   .verve-root {
+ *     --verve-primary: #7c3aed;
+ *     --verve-bg: #0a0a0f;
+ *     --verve-text: #ffffff;
+ *     --verve-border: rgba(255,255,255,0.08);
+ *   }
+ *
+ * Internal components use these variables exclusively so that theming
+ * is consistent and predictable without runtime JS overrides.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.verve-root {
+    /* ── Color tokens ─────────────────────────────────────────────────────── */
+    --verve-primary:      #7c3aed;
+    --verve-primary-hover:#6d28d9;
+    --verve-bg:           #0a0a0f;
+    --verve-bg-elevated:  rgba(255, 255, 255, 0.04);
+    --verve-text:         #ffffff;
+    --verve-text-muted:   rgba(255, 255, 255, 0.5);
+    --verve-border:       rgba(255, 255, 255, 0.08);
+    --verve-danger:       #ef4444;
+    --verve-success:      #22c55e;
+
+    /* ── Typography ──────────────────────────────────────────────────────── */
+    --verve-font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --verve-font-size:    14px;
+
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+    --verve-radius:       12px;
+    --verve-radius-sm:    8px;
+
+    /* ── Base styles applied to the root container ────────────────────────── */
+    font-family: var(--verve-font);
+    font-size:   var(--verve-font-size);
+    color:       var(--verve-text);
+    background:  var(--verve-bg);
+    box-sizing:  border-box;
+    width:       100%;
+    height:      100%;
+    position:    relative;
+    overflow:    hidden;
+}
+
+/* ── Ensure children inherit box-sizing ────────────────────────────────────── */
+.verve-root *,
+.verve-root *::before,
+.verve-root *::after {
+    box-sizing: inherit;
+}
+
+/* ── SDK container sizing ─────────────────────────────────────────────────── */
+.verve-container {
+    width:  100%;
+    height: 100%;
+}
+
+/* ── Powered-by badge (SDK mode) ──────────────────────────────────────────── */
+.verve-powered-by {
+    position: absolute;
+    bottom:   4px;
+    right:    10px;
+    font-size:   0.6rem;
+    color:       var(--verve-text-muted);
+    letter-spacing: 0.03em;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0.5;
+}
+
+.verve-powered-by strong {
+    color:       var(--verve-text);
+    font-weight: 600;
+    opacity:     0.7;
+}
