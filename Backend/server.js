@@ -6,8 +6,9 @@ const http      = require("http");
 const cors      = require("cors");
 const mongoose  = require("mongoose");
 
-const authRoutes = require("./routes/auth");
-const roomRoutes = require("./routes/rooms");
+const authRoutes   = require("./routes/auth");
+const roomRoutes   = require("./routes/rooms");
+const tenantRoutes = require("./routes/tenant");
 const Room       = require("./models/Room");
 const { socketAuthMiddleware } = require("./middleware/auth");
 
@@ -74,8 +75,9 @@ app.use(express.json());
 
 app.get("/", (req, res) => res.send("Server is running"));
 
-app.use("/api/auth",  authRoutes);
-app.use("/api/rooms", roomRoutes);
+app.use("/api/auth",   authRoutes);
+app.use("/api/rooms",  roomRoutes);
+app.use("/api/tenant", tenantRoutes);
 
 // ── Socket.IO ───────────────────────────────────────────────────────────────
 
@@ -188,6 +190,29 @@ io.on("connection", (socket) => {
             const roomId = rawRoomId.trim().toLowerCase();
             const { id: userId, name } = socket.user;
 
+            // ── Tenant-room isolation (constraint 11) ────────────────────
+            // One DB read shared by both paths to avoid duplicate queries.
+            const dbRoomRecord = await Room.findOne({ roomId }).lean();
+
+            if (socket.embedContext) {
+                // Embed socket: JWT roomId must match the requested room
+                if (socket.embedContext.roomId !== roomId) {
+                    return callback({ error: "Room ID does not match embed token" });
+                }
+                if (!dbRoomRecord || String(dbRoomRecord.tenantId) !== socket.embedContext.tenantId) {
+                    return callback({ error: "Invalid room or tenant mismatch" });
+                }
+                // Constraint 8: reject expired rooms at join time
+                if (dbRoomRecord.expiresAt && new Date(dbRoomRecord.expiresAt) < new Date()) {
+                    return callback({ error: "This room has expired" });
+                }
+            } else {
+                // Regular socket: cannot impersonate or enter tenant rooms (constraint 11)
+                if (dbRoomRecord && dbRoomRecord.tenantId) {
+                    return callback({ error: "This room requires an embed token" });
+                }
+            }
+
             socket.join(roomId);
             socket.roomId = roomId;
 
@@ -198,11 +223,14 @@ io.on("connection", (socket) => {
                     peers:         new Map(),
                     usersInRoom:   new Map(),
                     chatHistory:   [],
+                    // For tenant rooms the first embed guest becomes the in-memory "creator"
+                    // for timer/end-meeting gating. This does NOT affect DB ownership.
                     creatorUserId: userId,
-                    speakingTimes: {},    // userId → cumulative ms
-                    statsInterval: null,  // setInterval id for broadcasting stats
-                    timer:         null,  // { durationMs, startedAt } when active
-                    timerTimeout:  null,  // setTimeout id for auto-expiry
+                    tenantId:      socket.embedContext?.tenantId || null,
+                    speakingTimes: {},
+                    statsInterval: null,
+                    timer:         null,
+                    timerTimeout:  null,
                 });
                 console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
             }
@@ -225,6 +253,7 @@ io.on("connection", (socket) => {
 
             // isCreator is userId-based so it works correctly across multiple tabs
             const isCreator = room.creatorUserId === userId;
+
 
             callback({
                 rtpCapabilities: room.router.rtpCapabilities,
