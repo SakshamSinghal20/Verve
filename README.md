@@ -674,7 +674,7 @@ This project is available under the [MIT License](LICENSE).
 
 ### Built with 🔥 by
 
-**Saksham Singhal**
+**Saksham Singhal and Shivam Mishra** 
 
 <br/>
 
