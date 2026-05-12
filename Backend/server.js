@@ -17,9 +17,9 @@ const server = http.createServer(app);
 
 // ── Config constants ────────────────────────────────────────────────────────
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const SERVER_IP    = process.env.SERVER_IP    || "127.0.0.1";
-const PORT         = process.env.PORT         || 5000;
+const FRONTEND_URL = process.env.FRONTEND_URL;
+const SERVER_IP    = process.env.SERVER_IP;
+const PORT         = process.env.PORT;
 
 /** Maximum speaking-update ms accepted per event (prevents runaway accumulation). */
 const MAX_SPEAKING_UPDATE_MS = 10000;
