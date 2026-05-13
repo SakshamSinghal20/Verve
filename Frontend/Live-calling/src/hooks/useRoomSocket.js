@@ -46,6 +46,23 @@ function playReactionChime(type) {
     } catch { /* ignore audio errors silently */ }
 }
 
+function requestUserMediaWithTimeout(constraints, timeoutMs = 8000) {
+    let timeoutId;
+
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            const err = new Error("Camera/mic permission timed out");
+            err.name = "NotAllowedError";
+            reject(err);
+        }, timeoutMs);
+    });
+
+    return Promise.race([
+        navigator.mediaDevices.getUserMedia(constraints),
+        timeout,
+    ]).finally(() => clearTimeout(timeoutId));
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────────
 
 /**
@@ -224,18 +241,27 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                 });
 
                 setStatus("Requesting camera & mic…");
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-                });
-                streamRef.current = stream;
-                if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+                try {
+                    const stream = await requestUserMediaWithTimeout({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    });
+                    streamRef.current = stream;
+                    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-                const videoTrack = stream.getVideoTracks()[0];
-                if (videoTrack) producersRef.current.push(await sendTransport.produce({ track: videoTrack }));
+                    const videoTrack = stream.getVideoTracks()[0];
+                    if (videoTrack) producersRef.current.push(await sendTransport.produce({ track: videoTrack }));
+                    else setIsCamOff(true);
 
-                const audioTrack = stream.getAudioTracks()[0];
-                if (audioTrack) producersRef.current.push(await sendTransport.produce({ track: audioTrack }));
+                    const audioTrack = stream.getAudioTracks()[0];
+                    if (audioTrack) producersRef.current.push(await sendTransport.produce({ track: audioTrack }));
+                    else setIsMuted(true);
+                } catch (mediaErr) {
+                    setIsCamOff(true);
+                    setIsMuted(true);
+                    showToast("Joined without camera/mic. Use browser permissions to enable media.");
+                    console.warn("[Room] Joined without local media:", mediaErr);
+                }
 
                 setStatus("live");
 
@@ -354,6 +380,11 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
 
         sock.on("connect_error", (err) => {
             if (err.message === "Authentication required" || err.message === "Invalid or expired token") {
+                if (isEmbedMode) {
+                    setStatus("error");
+                    setToast({ msg: err.message, hide: false });
+                    return;
+                }
                 navigate("/login", { replace: true });
             }
         });
