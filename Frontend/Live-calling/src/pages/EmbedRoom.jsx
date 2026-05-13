@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { EmbedContext } from "../context/EmbedContext";
@@ -26,22 +26,22 @@ export default function EmbedRoom() {
 
     // ── Decode embed JWT for UI/branding only (constraint 5) ─────────────
     // NEVER used for authorization — server verifies the token independently.
-    const decoded = token ? decodeJwt(token) : null;
+    const decoded = useMemo(() => token ? decodeJwt(token) : null, [token]);
 
     // ── Build centralized embed context value (constraint 2) ─────────────
     // All embed-mode branching in child components uses useEmbed(), not props.
-    const embedCtxValue = {
+    const embedCtxValue = useMemo(() => ({
         isEmbedMode: true,
         embedToken:  token,
         tenantId:    decoded?.tenantId || null,
         roomId:      decoded?.roomId   || null,
         role:        decoded?.role     || "participant",
-    };
+    }), [decoded?.tenantId, decoded?.roomId, decoded?.role, token]);
 
     // Guest identity derived from token claims (UI convenience only)
-    const embedUser = decoded
+    const embedUser = useMemo(() => decoded
         ? { id: decoded.guestId, name: decoded.guestName || "Guest" }
-        : null;
+        : null, [decoded?.guestId, decoded?.guestName]);
 
     // ── Tenant branding ────────────────────────────────────────────────────
     const [branding, setBranding] = useState(null);

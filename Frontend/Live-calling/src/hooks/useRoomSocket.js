@@ -190,14 +190,16 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
 
         const sock = createSocket(embedToken);
         socketRef.current = sock;
-        sock.connect();
-
+        let cancelled = false;
+        const isActiveSocket = () => !cancelled && socketRef.current === sock && sock.connected;
         // ── Room initialisation ──────────────────────────────────────────
         async function init() {
             try {
+                if (!isActiveSocket()) return;
                 setStatus("Joining room…");
                 const { rtpCapabilities, isCreator: creator, myUserId, myName, timerState: ts }
                     = await emitAsync("join-room", roomId);
+                if (!isActiveSocket()) return;
 
                 if (creator) setIsCreator(true);
                 if (ts) setTimerState(ts); // sync timer for late joiners
@@ -211,10 +213,12 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                 setStatus("Loading device…");
                 const device = new mediasoupClient.Device();
                 await device.load({ routerRtpCapabilities: rtpCapabilities });
+                if (!isActiveSocket()) return;
                 deviceRef.current = device;
 
                 setStatus("Setting up connection…");
                 const sendTransportParams = await emitAsync("create-send-transport");
+                if (!isActiveSocket()) return;
                 const sendTransport = device.createSendTransport(sendTransportParams);
                 sendTransportRef.current = sendTransport;
 
@@ -232,6 +236,7 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                 });
 
                 const recvTransportParams = await emitAsync("create-recv-transport");
+                if (!isActiveSocket()) return;
                 const recvTransport = device.createRecvTransport(recvTransportParams);
                 recvTransportRef.current = recvTransport;
 
@@ -247,6 +252,7 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                     });
                     streamRef.current = stream;
+                    if (!isActiveSocket()) return;
                     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
                     const videoTrack = stream.getVideoTracks()[0];
@@ -266,6 +272,7 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                 setStatus("live");
 
                 const { producers } = await emitAsync("get-producers");
+                if (!isActiveSocket()) return;
                 const infoFromProducers = {};
                 producers.forEach(({ peerId, userId, name }) => {
                     if (userId && name) infoFromProducers[peerId] = { userId, name };
@@ -278,6 +285,7 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
                 }
 
                 const { messages } = await emitAsync("get-chat-history");
+                if (!isActiveSocket()) return;
                 if (messages?.length) setChatMessages(messages);
 
             } catch (err) {
@@ -379,9 +387,9 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
         });
 
         sock.on("connect_error", (err) => {
+            setStatus("error");
             if (err.message === "Authentication required" || err.message === "Invalid or expired token") {
                 if (isEmbedMode) {
-                    setStatus("error");
                     setToast({ msg: err.message, hide: false });
                     return;
                 }
@@ -389,11 +397,22 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
             }
         });
 
+        const connectTimeout = setTimeout(() => {
+            if (!sock.connected) {
+                setStatus("error");
+                setToast({ msg: "Could not connect to Verve backend", hide: false });
+            }
+        }, 8000);
+
+        sock.once("connect", () => clearTimeout(connectTimeout));
+        sock.connect();
         if (sock.connected) init();
         else sock.once("connect", () => init());
 
         // ── Cleanup ──────────────────────────────────────────────────────
         return () => {
+            cancelled = true;
+            initializedRef.current = false;
             streamRef.current?.getTracks().forEach((t) => t.stop());
             producersRef.current.forEach((p) => p.close());
             consumersRef.current.forEach((c) => c.close());
@@ -402,6 +421,7 @@ export default function useRoomSocket(roomId, user, authLoading, embedToken = nu
             recvTransportRef.current?.close();
             if (raiseTimerRef.current)  clearTimeout(raiseTimerRef.current);
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            clearTimeout(connectTimeout);
             sock.disconnect();
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
