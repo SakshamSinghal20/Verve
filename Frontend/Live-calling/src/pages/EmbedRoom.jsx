@@ -6,6 +6,7 @@ import useRoomSocket from "../hooks/useRoomSocket";
 import VideoGrid          from "../components/VideoGrid";
 import ControlBar         from "../components/ControlBar";
 import TimerBar           from "../components/TimerBar";
+import RoomPulse          from "../components/RoomPulse";
 import ChatPanel          from "../components/ChatPanel";
 import ParticipantsPanel  from "../components/ParticipantsPanel";
 import SpeakingStatsPanel from "../components/SpeakingStatsPanel";
@@ -93,6 +94,27 @@ export default function EmbedRoom() {
         Object.values(room.remoteStreams).filter(
             (s) => s.screen?.getVideoTracks().some((t) => t.readyState === "live")
         ).length;
+
+    useEffect(() => {
+        window.parent?.postMessage({
+            type: "verve:status",
+            status: room.status,
+            roomId,
+            tenantId: decoded?.tenantId || null,
+            role: decoded?.role || "participant",
+            guestId: decoded?.guestId || null,
+            guestName: decoded?.guestName || "Guest",
+            roomEnded: room.roomEnded,
+        }, "*");
+    }, [
+        room.status,
+        room.roomEnded,
+        roomId,
+        decoded?.tenantId,
+        decoded?.role,
+        decoded?.guestId,
+        decoded?.guestName,
+    ]);
 
     // ── Panel toggle helpers ────────────────────────────────────────────────
     function toggleChat() {
@@ -201,6 +223,16 @@ export default function EmbedRoom() {
                 />
 
                 {/* ── Video Grid ─────────────────────────────────────────── */}
+                <RoomPulse
+                    totalParticipants={totalParticipants}
+                    raisedHands={room.raisedHands}
+                    speakingStats={room.speakingStats}
+                    timerState={room.timerState}
+                    timerRemaining={room.timerRemaining}
+                    isScreenSharing={room.isScreenSharing}
+                    pinnedInfo={room.pinnedInfo}
+                />
+
                 <VideoGrid
                     localVideoRef={room.localVideoRef}
                     localScreenStream={room.localScreenStream}

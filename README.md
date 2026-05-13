@@ -459,6 +459,28 @@ Response:
 
 ## 📦 Verve SDK (Phase 2)
 
+### White-label embed helper
+
+For partner platforms that already receive a server-generated embed token, mount Verve without React:
+
+```js
+import Verve from "./sdk";
+
+const embed = Verve.embed({
+  container: "#support-call",
+  roomId: "abc123def456",
+  token: "eyJ...",
+  frontendUrl: "https://your-verve-host.com",
+  style: { minHeight: "640px", borderRadius: "12px" },
+});
+
+// Later:
+embed.destroy();
+```
+
+You can also pass the full `embedUrl` returned by `POST /api/tenant/rooms/:roomId/token`.
+Keep tenant API keys on your server; the browser embed only needs the short-lived token.
+
 The SDK provides a clean, high-level API for code-based integration. Mediasoup/WebRTC internals stay completely hidden.
 
 ### Installation

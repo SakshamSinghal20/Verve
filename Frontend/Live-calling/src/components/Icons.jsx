@@ -65,6 +65,31 @@ export const IconPhone = ({ className = "" }) => (
     </svg>
 );
 
+export const IconMore = ({ className = "" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="1"/>
+        <circle cx="19" cy="12" r="1"/>
+        <circle cx="5" cy="12" r="1"/>
+    </svg>
+);
+
+export const IconTimer = ({ className = "" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="13" r="8"/>
+        <path d="M12 9v4l3 2"/>
+        <path d="M9 2h6"/>
+    </svg>
+);
+
+export const IconChart = ({ className = "" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3v18h18"/>
+        <rect x="7" y="12" width="3" height="5"/>
+        <rect x="12" y="8" width="3" height="9"/>
+        <rect x="17" y="5" width="3" height="12"/>
+    </svg>
+);
+
 export const IconPin = ({ filled = false }) => (
     <svg viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/>
