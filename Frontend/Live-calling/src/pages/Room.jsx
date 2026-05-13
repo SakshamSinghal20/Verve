@@ -6,6 +6,7 @@ import useRoomSocket from "../hooks/useRoomSocket";
 import VideoGrid     from "../components/VideoGrid";
 import ControlBar    from "../components/ControlBar";
 import TimerBar      from "../components/TimerBar";
+import RoomPulse     from "../components/RoomPulse";
 import ChatPanel     from "../components/ChatPanel";
 import ParticipantsPanel   from "../components/ParticipantsPanel";
 import SpeakingStatsPanel  from "../components/SpeakingStatsPanel";
@@ -133,6 +134,16 @@ export default function Room() {
             />
 
             {/* ── Video area ────────────────────────────────────────────── */}
+            <RoomPulse
+                totalParticipants={totalParticipants}
+                raisedHands={room.raisedHands}
+                speakingStats={room.speakingStats}
+                timerState={room.timerState}
+                timerRemaining={room.timerRemaining}
+                isScreenSharing={room.isScreenSharing}
+                pinnedInfo={room.pinnedInfo}
+            />
+
             <VideoGrid
                 localVideoRef={room.localVideoRef}
                 localScreenStream={room.localScreenStream}
