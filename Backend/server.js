@@ -62,6 +62,9 @@ function checkCorsOrigin(origin, callback) {
     // Exact match against allowed origins
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
+    // Allow any localhost port (covers Vite booting on 5173, 5174, 3000, etc.)
+    if (/^http:\/\/localhost:\d+$/.test(origin)) return callback(null, true);
+
     // Allow any Vercel preview/production deployment for this project
     if (/^https:\/\/verve[a-z0-9-]*\.vercel\.app$/.test(origin)) {
         return callback(null, true);
