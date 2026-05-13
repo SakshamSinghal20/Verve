@@ -59,6 +59,11 @@
     height: 100%;
 }
 
+.verve-embed-frame {
+    color-scheme: dark;
+    background: #0a0a0a;
+}
+
 /* ── Powered-by badge (SDK mode) ──────────────────────────────────────────── */
 .verve-powered-by {
     position: absolute;

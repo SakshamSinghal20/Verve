@@ -14,6 +14,7 @@
 export { default as default }                 from "./VerveSDK";
 export { VerveSession, ConnectionState, SdkEvent } from "./VerveSession";
 export { VerveEventEmitter }                  from "./VerveEventEmitter";
+export { buildEmbedUrl, mountEmbed }          from "./VerveEmbed";
 
 // ── React Bindings ──────────────────────────────────────────────────────────
 export { VerveProvider, useVerveSession }      from "./VerveProvider";

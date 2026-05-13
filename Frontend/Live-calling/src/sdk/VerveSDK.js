@@ -11,6 +11,7 @@
  */
 
 import { VerveSession } from "./VerveSession";
+import { buildEmbedUrl, mountEmbed } from "./VerveEmbed";
 
 const API_URL =
     (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_URL) ||
@@ -19,6 +20,10 @@ const API_URL =
 const Verve = {
     /** SDK version — for compatibility tracking (constraint 6) */
     version: "0.1.0",
+
+    buildEmbedUrl,
+
+    embed: mountEmbed,
 
     /**
      * Initialize a Verve session.
