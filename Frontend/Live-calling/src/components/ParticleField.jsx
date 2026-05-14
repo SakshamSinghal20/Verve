@@ -6,10 +6,10 @@ const MOUSE_CONNECT_DIST = 200;
 const MOUSE_RADIUS = 160;
 
 const PALETTES = [
-    { core: "0, 240, 255", glow: "0, 240, 255" },    // cyan
-    { core: "184, 41, 221", glow: "184, 41, 221" },  // purple
-    { core: "255, 45, 149", glow: "255, 45, 149" },  // pink
-    { core: "255, 255, 255", glow: "200, 220, 255" }, // white/soft blue
+    { core: "255, 209, 102", glow: "255, 209, 102" },  // champagne
+    { core: "255, 51, 102", glow: "255, 51, 102" },  // coral
+    { core: "255, 112, 150", glow: "255, 112, 150" },    // soft coral
+    { core: "255, 255, 255", glow: "245, 245, 244" }, // white/warm white
 ];
 
 function ParticleField() {
@@ -149,7 +149,7 @@ function ParticleField() {
                         ctx.beginPath();
                         ctx.moveTo(particles[i].x, particles[i].y);
                         ctx.lineTo(particles[j].x, particles[j].y);
-                        ctx.strokeStyle = `rgba(0, 240, 255, ${alpha * (0.4 + avgDepth * 0.6)})`;
+                        ctx.strokeStyle = `rgba(255, 209, 102, ${alpha * (0.4 + avgDepth * 0.6)})`;
                         ctx.lineWidth = 0.4 + avgDepth * 0.5;
                         ctx.stroke();
                     }

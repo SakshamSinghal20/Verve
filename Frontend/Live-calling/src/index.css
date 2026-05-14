@@ -1,25 +1,25 @@
 /* ── Design System Tokens ────────────────────────────────── */
 :root {
-  --primary:        #6366F1;
-  --primary-light:  #818CF8;
-  --primary-dark:   #4F46E5;
-  --secondary:      #22C55E;
-  --secondary-light:#4ADE80;
-  --bg:             #0F172A;
-  --surface:        #1E293B;
-  --surface-2:      #253047;
-  --border:         #334155;
-  --border-subtle:  #1E293B;
-  --text:           #F8FAFC;
-  --text-muted:     #94A3B8;
-  --text-faint:     #475569;
-  --danger:         #EF4444;
+  --primary:        #FF3366;
+  --primary-light:  #FFE8A3;
+  --primary-dark:   #C9184A;
+  --secondary:      #FFD166;
+  --secondary-light:#FFE8A3;
+  --bg:             #11100E;
+  --surface:        #1C1917;
+  --surface-2:      #292524;
+  --border:         #292524;
+  --border-subtle:  #1C1917;
+  --text:           #FAFAF9;
+  --text-muted:     #A8A29E;
+  --text-faint:     #57534E;
+  --danger:         #FF3366;
   --radius-sm:      6px;
   --radius-md:      10px;
   --radius-lg:      16px;
   --radius-xl:      24px;
   --shadow-md:      0 4px 20px rgba(0,0,0,0.5);
-  --shadow-glow:    0 0 40px rgba(99,102,241,0.25);
+  --shadow-glow:    0 0 40px rgba(255,51,102,0.25);
   --transition:     0.2s cubic-bezier(0.4,0,0.2,1);
 }
 
@@ -36,7 +36,7 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #050508;
-  color: #E2E8F0;
+  color: #E7E5E4;
   min-height: 100%;
   width: 100%;
 }
@@ -45,7 +45,7 @@ body {
   min-height: 100dvh;
   width: 100%;
   background-color: #050508;
-  color: #E2E8F0;
+  color: #E7E5E4;
   overflow-x: hidden;
 }
 
@@ -58,8 +58,8 @@ body {
 /* ── Scrollbar ───────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #475569; }
+::-webkit-scrollbar-thumb { background: #292524; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #57534E; }
 
 /* ── Global Keyframes ────────────────────────────────────── */
 @keyframes gradient-shift {

@@ -4,7 +4,7 @@
  * Developers override these variables to customize appearance:
  *
  *   .verve-root {
- *     --verve-primary: #7c3aed;
+ *     --verve-primary: #FF3366;
  *     --verve-bg: #0a0a0f;
  *     --verve-text: #ffffff;
  *     --verve-border: rgba(255,255,255,0.08);
@@ -16,8 +16,8 @@
 
 .verve-root {
     /* ── Color tokens ─────────────────────────────────────────────────────── */
-    --verve-primary:      #7c3aed;
-    --verve-primary-hover:#6d28d9;
+    --verve-primary:      #FF3366;
+    --verve-primary-hover:#F72560;
     --verve-bg:           #0a0a0f;
     --verve-bg-elevated:  rgba(255, 255, 255, 0.04);
     --verve-text:         #ffffff;
