@@ -276,7 +276,7 @@ Edit `Backend/.env`:
 | Variable | Default | What it does |
 |---|---|---|
 | `PORT` | `5000` | Server port |
-| `FRONTEND_URL` | `http://localhost:5173` | CORS origin |
+| `FRONTEND_URL` | `https://verve-live.vercel.app` | CORS origin |
 | `SERVER_IP` | `127.0.0.1` | Mediasoup announced IP |
 | `MONGO_URI` | — | MongoDB connection string |
 | `JWT_SECRET` | `verve-dev-secret-change-me` | Signs all JWTs (user & embed) |
@@ -295,7 +295,7 @@ Edit `Frontend/Live-calling/.env`:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VITE_BACKEND_URL` | `http://localhost:5000` | Backend URL |
+| `VITE_BACKEND_URL` | `http://3.108.133.255:5000` | Backend URL |
 
 </details>
 
@@ -311,7 +311,7 @@ cd Frontend/Live-calling && npm run dev
 
 ### 4️⃣ Use it
 
-1. Open **http://localhost:5173** in your browser
+1. Open **https://verve-live.vercel.app** in your browser
 2. Register an account, then click **✦ Create Meeting**
 3. Share the **Room ID** — they paste it in Join and you're live 🎉
 
@@ -421,7 +421,7 @@ Response:
 ```json
 {
   "roomId": "abc123def456",
-  "embedUrl": "http://localhost:5173/embed/abc123def456",
+  "embedUrl": "https://verve-live.vercel.app/embed/abc123def456",
   "expiresAt": "2024-01-01T14:00:00.000Z"
 }
 ```
@@ -439,7 +439,7 @@ Response:
 ```json
 {
   "token": "eyJ...",
-  "embedUrl": "http://localhost:5173/embed/ROOM?token=eyJ...",
+  "embedUrl": "https://verve-live.vercel.app/embed/ROOM?token=eyJ...",
   "guestId": "guest_abc123"
 }
 ```
@@ -448,7 +448,7 @@ Response:
 
 ```html
 <iframe
-  src="http://localhost:5173/embed/ROOM_ID?token=JWT_TOKEN"
+  src="https://verve-live.vercel.app/embed/ROOM_ID?token=JWT_TOKEN"
   allow="camera; microphone; display-capture"
   width="100%"
   height="600px"
