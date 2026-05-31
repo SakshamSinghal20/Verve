@@ -334,6 +334,7 @@ Verve/
 │   │   └── 🚪 Room.js              ← Room schema with tenantId + TTL expiry
 │   ├── 📂 routes/
 │   │   ├── 🛣️ auth.js              ← Register & login endpoints
+│   │   ├── 🚪 rooms.js             ← Room API: instant, custom, join
 │   │   └── 🏢 tenant.js            ← Tenant API: rooms, tokens, branding
 │   └── 📋 .env.example
 │
@@ -449,15 +450,41 @@ Response:
 ```html
 <iframe
   src="https://verve-live.vercel.app/embed/ROOM_ID?token=JWT_TOKEN"
-  allow="camera; microphone; display-capture"
+  allow="camera; microphone; display-capture; fullscreen; clipboard-write"
   width="100%"
-  height="600px"
+  height="640px"
 />
+```
+
+### Parent Page Communication (postMessage)
+
+The embedded iframe communicates status changes back to the host window using `window.parent.postMessage`. The host page can listen for these events to track the meeting session state:
+
+```js
+window.addEventListener("message", (event) => {
+  // Ensure the message is from your Verve deployment origin
+  if (event.origin !== "https://verve-live.vercel.app") return;
+
+  const data = event.data;
+  if (data?.type === "verve:status") {
+    const { status, roomId, tenantId, role, guestId, guestName, roomEnded } = data;
+    console.log(`Room Status changed to: ${status} (Ended: ${roomEnded})`);
+  }
+});
 ```
 
 ---
 
 ## 📦 Verve SDK (Phase 2)
+
+### Outsourcing WebRTC & Media Complexity
+
+Verve handles all selective forwarding unit (SFU) routing, WebRTC peer connection transport, DTLS handshakes, and multi-tenant database isolation. Implementing raw WebRTC or Mediasoup requires managing complex connection states, SDP signaling, and media streams; Verve wraps all this logic inside a simple, unified interface.
+
+The SDK is organized into three architectural layers:
+1. **Vanilla SDK Core (Framework Agnostic)**: `VerveSDK` (entry point), `VerveSession` (connection state machine), and `VerveEventEmitter` (stable events). Has zero dependencies on UI frameworks and can be used in React, Vue, Svelte, or vanilla JS.
+2. **React Bindings**: `VerveProvider` (injects theme CSS variables and provides context) and `useVerveSession` (hook).
+3. **Prebuilt UI Components**: Ready-made, highly functional React components (`VerveRoom`, `VerveControls`, `VerveChat`, `VerveParticipants`) that plug directly into the session.
 
 ### White-label embed helper
 
@@ -590,36 +617,42 @@ Override CSS variables on `.verve-root` or pass `theme` to `Verve.init()`:
 
 ### Client → Server
 
-| Event | Payload | What happens |
-|---|---|---|
-| `join-room` | `roomId` | Joins/creates a room, returns router RTP capabilities |
-| `create-send-transport` | — | Creates a WebRTC send transport |
-| `create-recv-transport` | — | Creates a WebRTC receive transport |
-| `connect-transport` | `{ transportId, dtlsParameters }` | DTLS handshake |
-| `produce` | `{ transportId, kind, rtpParameters }` | Start sending media |
-| `consume` | `{ producerId, rtpCapabilities }` | Start receiving media |
-| `resume-consumer` | `{ consumerId }` | Unpause a consumer |
-| `get-producers` | — | Get all existing producers |
-| `send-message` | `{ message }` | Send a chat message |
-| `get-chat-history` | — | Fetch room chat history |
-| `raise-hand` | `{ raised }` | Toggle hand raise |
-| `toggle-mute` | — | Toggle microphone mute |
-| `toggle-camera` | — | Toggle camera on/off |
+| Event | Payload | Response/Callback | Description |
+|---|---|---|---|
+| `join-room` | `rawRoomId` (string) | `{ rtpCapabilities, isCreator, myUserId, myName, timerState }` or `{ error }` | Normalizes Room ID, validates tokens (regular or embed), verifies expiration, and returns room details. |
+| `create-send-transport` | — | `{ id, iceParameters, iceCandidates, dtlsParameters }` or `{ error }` | Initiates worker send transport on the server. |
+| `create-recv-transport` | — | `{ id, iceParameters, iceCandidates, dtlsParameters }` or `{ error }` | Initiates worker receive transport on the server. |
+| `connect-transport` | `{ transportId, dtlsParameters }` | `{ connected: true }` or `{ error }` | Completes DTLS handshakes for the transport. |
+| `produce` | `{ transportId, kind, rtpParameters, appData }` | `{ id }` or `{ error }` | Starts producing video, audio, or screen media. |
+| `consume` | `{ producerId, rtpCapabilities }` | `{ id, producerId, kind, rtpParameters }` or `{ error }` | Creates a paused stream consumer for a participant. |
+| `resume-consumer` | `{ consumerId }` | `{ resumed: true }` or `{ error }` | Resumes the paused stream consumer. |
+| `get-producers` | — | `{ producers: [] }` (list of active producers) or `{ error }` | Returns all active stream producers in the room. |
+| `send-message` | `{ message }` | `{ sent: true }` or `{ error }` | Sends a message to the room chat channel. |
+| `get-chat-history` | — | `{ messages: [] }` or `{ error }` | Returns the recent in-memory chat message history. |
+| `raise-hand` | `{ raised }` | — | Toggles hand-raised status; broadcasts state to the room. |
+| `send-reaction` | `{ type }` | — | Sends floating reactions (`"confetti"`, `"clap"`, `"laugh"`, `"heart"`, `"fire"`, `"thumbsup"`). Rate-limited to 1 reaction per second. |
+| `speaking-update` | `{ durationMs }` | — | Reports active speaking duration for dynamic statistics tracking. |
+| `start-timer` | `{ durationMs }` | — | Starts the shared focus timer (host only). |
+| `stop-timer` | — | — | Stops the active focus timer (host only). |
+
+> 💡 **SDK Client Actions**: The vanilla SDK wrapper (`VerveSession.js`) also exposes methods that emit helper events like `toggle-mute`, `toggle-camera`, `start-screen-share`, `stop-screen-share`, `toggle-raise-hand`, and `chat-message` to assist with headless custom integrations.
 
 ### Server → Client
 
-| Event | Payload | When |
+| Event | Payload | Trigger |
 |---|---|---|
-| `new-producer` | `{ producerId, peerId, kind }` | Someone started sharing media |
-| `new-peer` | `{ peerId }` | Someone joined |
-| `peer-left` | `{ peerId }` | Someone left |
-| `producer-closed` | `{ producerId }` | A media stream stopped |
-| `peers-list` | `{ peers[] }` | Updated peer list |
-| `new-message` | `{ peerId, message, timestamp }` | New chat message |
-| `hand-raised` | `{ peerId, raised }` | Hand raise toggled |
-| `room-ended` | — | Host ended the meeting |
-| `user-joined` | `{ userId, name }` | SDK: participant joined |
-| `user-left` | `{ userId, name }` | SDK: participant left |
+| `new-producer` | `{ producerId, peerId, userId, name, kind, appData }` | Broadcasted when a participant begins producing media. |
+| `new-peer` | `{ peerId, userId, name }` | Broadcasted when a new user successfully joins the room. |
+| `peer-left` | `{ peerId, userId }` | Broadcasted when a participant leaves or disconnects. |
+| `producer-closed` | `{ producerId }` | Broadcasted when a producer shuts down their media track. |
+| `peers-list` | `{ peers: [{ peerId, userId, name }] }` | Emitted to update the local participants roster. |
+| `new-message` | `{ peerId, userId, name, message, timestamp }` | Dispatched to deliver a new chat message to all room members. |
+| `hand-raised` | `{ peerId, userId, name, raised }` | Dispatched when a participant raises or lowers their hand. |
+| `reaction` | `{ type, peerId, userId, name, timestamp }` | Dispatched when a participant triggers an emoji reaction. |
+| `speaking-stats` | `{ stats: { [userId]: { ms, name } } }` | Periodic broadcast tracking cumulative speaking durations. |
+| `timer-sync` | `{ durationMs, startedAt }` | Dispatched to sync focus timer configuration across all peers. |
+| `timer-ended` | — | Dispatched when the active focus timer duration elapses. |
+| `room-closed` | `{ reason }` | Sent when the room host closes the meeting or disconnects. |
 
 </details>
 
@@ -633,6 +666,15 @@ Override CSS variables on `.verve-root` or pass `theme` to `Verve.init()`:
 |---|---|---|---|
 | `POST` | `/api/auth/register` | `{ name, email, password }` | ❌ |
 | `POST` | `/api/auth/login` | `{ email, password }` | ❌ |
+| `GET` | `/api/auth/me` | — | ✅ Bearer Token |
+
+### Room API
+
+| Method | Endpoint | Body | Auth? |
+|---|---|---|---|
+| `POST` | `/api/rooms/instant` | — | ✅ Bearer Token |
+| `POST` | `/api/rooms` | `{ roomId }` | ✅ Bearer Token |
+| `POST` | `/api/rooms/join` | `{ roomId }` | ✅ Bearer Token |
 
 ### Tenant API
 
