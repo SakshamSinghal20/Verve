@@ -17,9 +17,14 @@ const server = http.createServer(app);
 
 // ── Config constants ────────────────────────────────────────────────────────
 
-const FRONTEND_URL = process.env.FRONTEND_URL;
-const SERVER_IP    = process.env.SERVER_IP;
-const PORT         = process.env.PORT;
+// Fall back to sane local-dev defaults so a missing .env never crashes startup
+// (previously FRONTEND_URL.split(...) threw a TypeError when the var was unset).
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const SERVER_IP    = process.env.SERVER_IP    || "127.0.0.1";
+const PORT         = process.env.PORT         || 5000;
+
+/** Maximum length of a single chat message accepted by the server (chars). */
+const MAX_CHAT_MESSAGE_LEN = 2000;
 
 /** Maximum speaking-update ms accepted per event (prevents runaway accumulation). */
 const MAX_SPEAKING_UPDATE_MS = 10000;
@@ -188,6 +193,9 @@ io.on("connection", (socket) => {
         try {
             if (!worker) return callback({ error: "Server not ready" });
             if (!socket.user) return callback({ error: "Authentication required" });
+            if (typeof rawRoomId !== "string" || !rawRoomId.trim()) {
+                return callback({ error: "A valid room ID is required" });
+            }
 
             // Normalize to match the REST routes (which also lowercase + trim)
             const roomId = rawRoomId.trim().toLowerCase();
@@ -216,6 +224,25 @@ io.on("connection", (socket) => {
                 }
             }
 
+            // ── Host authority (constraint: role must be honoured) ───────
+            // Who is allowed to end the meeting / control the focus timer:
+            //  • Embed rooms  → the token's `role` claim decides. A "host" is a
+            //    host regardless of join order; a "participant" never is.
+            //  • Regular rooms → the DB owner (createdBy) is the authoritative
+            //    host. Only ad-hoc rooms with no DB record fall back to
+            //    "first joiner becomes host".
+            // Previously the FIRST socket to join always became the host, which
+            // let a participant seize host powers and locked the real owner out.
+            let isHost;
+            if (socket.embedContext) {
+                isHost = socket.embedContext.role === "host";
+            } else if (dbRoomRecord?.createdBy) {
+                isHost = String(dbRoomRecord.createdBy) === String(userId);
+            } else {
+                isHost = !rooms.has(roomId); // first joiner of an ad-hoc room
+            }
+            socket.isHost = isHost;
+
             socket.join(roomId);
             socket.roomId = roomId;
 
@@ -226,19 +253,29 @@ io.on("connection", (socket) => {
                     peers:         new Map(),
                     usersInRoom:   new Map(),
                     chatHistory:   [],
-                    // For tenant rooms the first embed guest becomes the in-memory "creator"
-                    // for timer/end-meeting gating. This does NOT affect DB ownership.
-                    creatorUserId: userId,
+                    // Authoritative host userId, used for "close room when host leaves".
+                    //  • Regular room → the DB owner (may not be the first to join).
+                    //  • Embed room   → the first guest with role "host" (null until one joins).
+                    creatorUserId: (!socket.embedContext && dbRoomRecord?.createdBy)
+                        ? String(dbRoomRecord.createdBy)
+                        : (isHost ? userId : null),
                     tenantId:      socket.embedContext?.tenantId || null,
                     speakingTimes: {},
                     statsInterval: null,
                     timer:         null,
                     timerTimeout:  null,
                 });
-                console.log(`📦 Room ${roomId} created — creator: ${name} (${userId})`);
+                console.log(`📦 Room ${roomId} created — host: ${isHost ? `${name} (${userId})` : "pending"}`);
             }
 
             const room = rooms.get(roomId);
+
+            // If a host joins an embed room that was first opened by a participant,
+            // claim the (still-empty) host slot so timer/end-meeting gating works.
+            if (isHost && !room.creatorUserId) {
+                room.creatorUserId = userId;
+            }
+
             getOrCreatePeer(roomId, socket.id);
             room.usersInRoom.set(socket.id, { userId, name });
 
@@ -254,13 +291,10 @@ io.on("connection", (socket) => {
 
             console.log(`✅ ${name} (${userId}) joined room ${roomId} (${room.peers.size} peers)`);
 
-            // isCreator is userId-based so it works correctly across multiple tabs
-            const isCreator = room.creatorUserId === userId;
-
-
             callback({
                 rtpCapabilities: room.router.rtpCapabilities,
-                isCreator,
+                // Host powers come from role/ownership (computed above), not join order
+                isCreator: isHost,
                 myUserId: userId,
                 myName:   name,
                 timerState: room.timer || null,
@@ -279,14 +313,14 @@ io.on("connection", (socket) => {
         if (!currentRoomId || !rooms.has(currentRoomId)) return;
 
         const room = rooms.get(currentRoomId);
-        const requestingUserId = socket.user?.id;
 
-        if (room.creatorUserId !== requestingUserId) {
-            console.warn(`⚠️  Non-creator ${socket.id} attempted to end room ${currentRoomId}`);
+        // Only a host (role-based / DB owner) may end the meeting for everyone
+        if (!socket.isHost) {
+            console.warn(`⚠️  Non-host ${socket.id} attempted to end room ${currentRoomId}`);
             return;
         }
 
-        console.log(`🔚 Creator ${socket.id} ended room ${currentRoomId}`);
+        console.log(`🔚 Host ${socket.id} ended room ${currentRoomId}`);
         io.to(currentRoomId).emit("room-closed", { reason: "Host ended the meeting" });
 
         closeRoom(room);
@@ -481,17 +515,24 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("send-message", ({ message }, callback) => {
+    socket.on("send-message", ({ message } = {}, callback) => {
         try {
             const room = rooms.get(socket.roomId);
             if (!room) return callback?.({ error: "Room not found" });
+
+            // Validate: must be a non-empty string; clip to a sane length so a
+            // malicious client cannot broadcast/store megabytes of text.
+            if (typeof message !== "string" || !message.trim()) {
+                return callback?.({ error: "Message must be a non-empty string" });
+            }
+            const cleanMessage = message.trim().slice(0, MAX_CHAT_MESSAGE_LEN);
 
             const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
             const chatMessage = {
                 peerId:    socket.id,
                 userId:    identity.userId,
                 name:      identity.name,
-                message,
+                message:   cleanMessage,
                 timestamp: Date.now(),
             };
 
@@ -519,15 +560,16 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("raise-hand", ({ raised }) => {
+    socket.on("raise-hand", ({ raised } = {}) => {
         if (!socket.roomId) return;
         const room     = rooms.get(socket.roomId);
-        const identity = room?.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
+        if (!room) return;
+        const identity = room.usersInRoom.get(socket.id) || { userId: socket.id, name: "Unknown" };
         io.to(socket.roomId).emit("hand-raised", {
             peerId: socket.id,
             userId: identity.userId,
             name:   identity.name,
-            raised,
+            raised: !!raised, // coerce to boolean so a bad payload can't wedge UI state
         });
     });
 
@@ -594,8 +636,8 @@ io.on("connection", (socket) => {
         const room = rooms.get(socket.roomId);
         if (!room) return;
 
-        // Only the creator can start a timer
-        if (room.creatorUserId !== socket.user?.id) return;
+        // Only a host can start a timer
+        if (!socket.isHost) return;
 
         // Validate duration bounds
         if (typeof durationMs !== "number" || durationMs < TIMER_MIN_MS || durationMs > TIMER_MAX_MS) return;
@@ -620,8 +662,8 @@ io.on("connection", (socket) => {
         const room = rooms.get(socket.roomId);
         if (!room) return;
 
-        // Only the creator can stop
-        if (room.creatorUserId !== socket.user?.id) return;
+        // Only a host can stop the timer
+        if (!socket.isHost) return;
 
         if (room.timerTimeout) clearTimeout(room.timerTimeout);
         room.timer        = null;
@@ -681,6 +723,15 @@ io.on("connection", (socket) => {
         });
 
         room.usersInRoom.delete(socket.id);
+
+        // If that was the user's last tab, drop their speaking-time entry so the
+        // stats panel doesn't keep showing someone who already left as "leading".
+        const stillConnected = Array.from(room.usersInRoom.values())
+            .some((u) => u.userId === disconnectingUserId);
+        if (!stillConnected && disconnectingUserId) {
+            delete room.speakingTimes[disconnectingUserId];
+        }
+
         io.to(currentRoomId).emit("peers-list", { peers: buildPeersList(room) });
 
         if (room.peers.size === 0) {

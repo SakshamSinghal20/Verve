@@ -87,13 +87,9 @@ export default function EmbedRoom() {
     const statusClass = room.status === "live" ? "live" : room.status === "error" ? "error" : "pending";
     const statusLabel = room.status === "live" ? "Live" : room.status === "error" ? "Connection failed" : room.status;
 
-    const totalParticipants =
-        1 +
-        Object.keys(room.remoteStreams).length +
-        (room.localScreenStream ? 1 : 0) +
-        Object.values(room.remoteStreams).filter(
-            (s) => s.screen?.getVideoTracks().some((t) => t.readyState === "live")
-        ).length;
+    // People count = actual sockets in the room (peersList includes you); screen
+    // shares are not people. Fall back to 1 before the first peers-list arrives.
+    const peopleCount = Math.max(room.peersList.length, 1);
 
     useEffect(() => {
         window.parent?.postMessage({
@@ -203,9 +199,9 @@ export default function EmbedRoom() {
                         </button>
                     </div>
 
-                    <div className="peer-count">
+                    <div className="peer-count" title={`${peopleCount} in this room`}>
                         <IconUsers />
-                        {totalParticipants}
+                        {peopleCount}
                     </div>
 
                     <div className={`status-pill ${statusClass}`}>
@@ -224,7 +220,7 @@ export default function EmbedRoom() {
 
                 {/* ── Video Grid ─────────────────────────────────────────── */}
                 <RoomPulse
-                    totalParticipants={totalParticipants}
+                    totalParticipants={peopleCount}
                     raisedHands={room.raisedHands}
                     speakingStats={room.speakingStats}
                     timerState={room.timerState}

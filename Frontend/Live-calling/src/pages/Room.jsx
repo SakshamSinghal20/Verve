@@ -35,13 +35,10 @@ export default function Room() {
     const statusClass = room.status === "live" ? "live" : room.status === "error" ? "error" : "pending";
     const statusLabel = room.status === "live" ? "Live" : room.status === "error" ? "Connection failed" : room.status;
 
-    const totalParticipants =
-        1 +
-        Object.keys(room.remoteStreams).length +
-        (room.localScreenStream ? 1 : 0) +
-        Object.values(room.remoteStreams).filter(
-            (s) => s.screen?.getVideoTracks().some((t) => t.readyState === "live")
-        ).length;
+    // People count = actual sockets in the room (peersList already includes you).
+    // Screen-share tiles are NOT people, so they must not inflate this number.
+    // Fall back to 1 before the first peers-list event arrives.
+    const peopleCount = Math.max(room.peersList.length, 1);
 
     // ── Panel toggle helpers ───────────────────────────────────────────────
 
@@ -114,9 +111,9 @@ export default function Room() {
                     </button>
                 </div>
 
-                <div className="peer-count">
+                <div className="peer-count" title={`${peopleCount} in this room`}>
                     <IconUsers />
-                    {totalParticipants}
+                    {peopleCount}
                 </div>
 
                 <div className={`status-pill ${statusClass}`}>
@@ -135,7 +132,7 @@ export default function Room() {
 
             {/* ── Video area ────────────────────────────────────────────── */}
             <RoomPulse
-                totalParticipants={totalParticipants}
+                totalParticipants={peopleCount}
                 raisedHands={room.raisedHands}
                 speakingStats={room.speakingStats}
                 timerState={room.timerState}

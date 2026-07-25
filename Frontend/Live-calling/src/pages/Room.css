@@ -5,7 +5,7 @@
 /* Force dark background on body/root when room is active to prevent white bleed */
 body:has(.room-container),
 body:has(.room-container) #root {
-  background-color: #000;
+  background-color: #050506;
 }
 
 .room-container {
@@ -14,7 +14,11 @@ body:has(.room-container) #root {
   height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
-  background: #000;
+  /* Layered ambient glow gives the stage depth instead of flat black */
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(255,51,102,0.10), transparent 60%),
+    radial-gradient(1000px 560px at 90% 110%, rgba(255,209,102,0.08), transparent 60%),
+    #050506;
   color: #e0e0e0;
   font-family: 'Inter', system-ui, sans-serif;
   position: relative;
@@ -26,8 +30,11 @@ body:has(.room-container) #root {
   align-items: center;
   gap: 0.75rem;
   padding: 0.7rem 1.25rem;
-  background: #0a0a0a;
-  border-bottom: 1px solid #1e1e1e;
+  background: linear-gradient(180deg, rgba(18,16,20,0.92) 0%, rgba(8,8,10,0.72) 100%);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 1px 0 rgba(255,51,102,0.10), 0 8px 24px rgba(0,0,0,0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 10;
   flex-shrink: 0;
 }
@@ -36,23 +43,28 @@ body:has(.room-container) #root {
   font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
   font-size: 1.2rem;
   font-weight: 800;
-  color: #FFFFFF;
   margin-right: auto;
   letter-spacing: -0.5px;
+  /* Champagne → rose gradient wordmark */
+  background: linear-gradient(100deg, #FFE8A3 0%, #FF7096 55%, #FF3366 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #FF7096; /* fallback for browsers without background-clip:text */
 }
 
 .room-id-badge {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  background: #111;
-  border: 1px solid #2a2a2a;
-  border-radius: 10px;
-  padding: 0.3rem 0.65rem;
-  transition: border-color 0.2s ease;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.room-id-badge:hover { border-color: #FF3366; }
+.room-id-badge:hover { border-color: rgba(255,51,102,0.55); background: rgba(255,51,102,0.06); }
 
 .room-id-label {
   font-size: 0.6rem;
@@ -90,12 +102,12 @@ body:has(.room-container) #root {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.78rem;
-  color: #888;
-  padding: 0.25rem 0.6rem;
-  background: #111;
-  border-radius: 10px;
-  border: 1px solid #222;
-  font-weight: 600;
+  color: #C7C2BC;
+  padding: 0.3rem 0.7rem;
+  background: rgba(255,255,255,0.04);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.09);
+  font-weight: 650;
 }
 
 .peer-count svg { width: 13px; height: 13px; color: #57534E; }
@@ -122,9 +134,9 @@ body:has(.room-container) #root {
   flex-shrink: 0;
 }
 
-.status-pill.live  { border-color: rgba(255,209,102,0.35); color: #FFD166; }
-.status-pill.live .status-dot { background: #FFD166; animation: pulse-ring 2s ease-out infinite; }
-.status-pill.error { border-color: rgba(255,51,102,0.35); color: #FF3366; }
+.status-pill.live  { border-color: rgba(255,209,102,0.35); color: #FFD166; background: rgba(255,209,102,0.07); }
+.status-pill.live .status-dot { background: #FFD166; box-shadow: 0 0 8px rgba(255,209,102,0.9); animation: pulse-ring 2s ease-out infinite; }
+.status-pill.error { border-color: rgba(255,51,102,0.35); color: #FF3366; background: rgba(255,51,102,0.07); }
 .status-pill.error .status-dot { background: #FF3366; }
 .status-pill.pending { animation: blink 1.8s ease-in-out infinite; }
 
@@ -132,11 +144,11 @@ body:has(.room-container) #root {
 .video-stage {
   flex: 1;
   display: grid;
-  background: #000;
+  background: transparent;
   overflow: hidden;
   min-height: 0;
-  gap: 2px;
-  padding: 2px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .video-stage.grid-1    { grid-template-columns: 1fr; gap: 0; padding: 0; }
@@ -148,17 +160,37 @@ body:has(.room-container) #root {
 .video-card {
   position: relative;
   overflow: hidden;
-  background: #0a0a0a;
-  border-radius: 8px;
+  background: radial-gradient(120% 120% at 50% 0%, #141215 0%, #0a0a0b 70%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 14px;
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: none;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 10px 30px rgba(0,0,0,0.45);
+  transition: transform 0.22s cubic-bezier(0.34,1.56,0.64,1),
+              box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
-.video-stage.grid-1 .video-card { border-radius: 0; }
+/* Gentle lift on hover for tiles in the grid (not the full-bleed single view) */
+.video-stage:not(.grid-1):not(.pinned-layout) .video-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255,209,102,0.28);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.05) inset,
+    0 16px 40px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,209,102,0.10);
+}
+
+.video-stage.grid-1 .video-card { border-radius: 0; border: none; }
+
+/* Subtle champagne ring marks your own tile in multi-tile views */
+.video-stage:not(.grid-1) .video-card.local {
+  border-color: rgba(255,209,102,0.22);
+}
 
 .video-card video {
   width: 100%;
@@ -179,24 +211,29 @@ body:has(.room-container) #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #0a0a0a;
-  gap: 0.65rem;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255,51,102,0.10), transparent 55%),
+    radial-gradient(120% 120% at 50% 0%, #141215 0%, #0a0a0b 70%);
+  gap: 0.7rem;
   z-index: 1;
 }
 
 .cam-off-avatar {
-  width: 68px;
-  height: 68px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: linear-gradient(135deg, #FF3366 0%, #C9184A 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.7rem;
+  font-size: 1.75rem;
   font-weight: 700;
   color: #fff;
   font-family: 'Plus Jakarta Sans', sans-serif;
-  box-shadow: 0 4px 24px rgba(255,51,102,0.4);
+  box-shadow:
+    0 4px 24px rgba(255,51,102,0.4),
+    0 0 0 1px rgba(255,255,255,0.10),
+    0 0 0 6px rgba(255,51,102,0.08);
 }
 
 .cam-off-overlay p {
@@ -209,24 +246,40 @@ body:has(.room-container) #root {
 /* Name tag */
 .video-label {
   position: absolute;
-  bottom: 0.65rem;
-  left: 0.65rem;
+  bottom: 0.7rem;
+  left: 0.7rem;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-radius: 6px;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: rgba(255,255,255,0.8);
-  border: 1px solid rgba(255,255,255,0.07);
+  gap: 0.35rem;
+  background: linear-gradient(180deg, rgba(20,18,22,0.55) 0%, rgba(0,0,0,0.7) 100%);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.1px;
+  color: rgba(255,255,255,0.9);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
   z-index: 2;
+  max-width: calc(100% - 1.4rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Small champagne dot before the local user's name for a premium touch */
 .video-card.local .video-label { color: #FFE8A3; }
+.video-card.local .video-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #FFD166;
+  box-shadow: 0 0 8px rgba(255,209,102,0.8);
+  flex-shrink: 0;
+}
 
 /* Screen share badge */
 .screen-share-badge {
@@ -257,16 +310,30 @@ body:has(.room-container) #root {
 
 /* ── Controls bar ────────────────────────────────────────── */
 .room-controls {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
   padding: 0.85rem 1.25rem;
-  background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.95) 100%);
+  background: linear-gradient(to top, rgba(6,6,7,0.98) 0%, rgba(12,10,14,0.82) 100%);
   border-top: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+}
+
+/* Hairline glow that fades across the top edge of the control bar */
+.room-controls::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,51,102,0.5), rgba(255,209,102,0.5), transparent);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .control-cluster {
@@ -276,10 +343,11 @@ body:has(.room-container) #root {
 }
 
 .control-cluster-primary {
-  padding: 0.25rem;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 18px;
+  padding: 0.3rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.04) inset;
 }
 
 .control-cluster-end {
@@ -846,8 +914,10 @@ body:has(.room-container) #root {
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 640px) {
   .room-header { padding: 0.5rem 0.75rem; flex-wrap: wrap; gap: 0.4rem; }
+  .video-stage { gap: 7px; padding: 7px; }
   .video-stage.grid-2 { grid-template-columns: 1fr; }
   .video-stage.grid-4 { grid-template-columns: 1fr 1fr; }
+  .video-card { border-radius: 12px; }
   .room-controls { padding: 0.65rem 0.5rem; gap: 0.35rem; }
   .control-cluster,
   .control-cluster-primary { gap: 0.3rem; }
